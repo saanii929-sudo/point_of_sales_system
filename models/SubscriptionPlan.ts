@@ -54,7 +54,6 @@ const SubscriptionPlanSchema = new Schema<ISubscriptionPlan>({
   sortOrder: { type: Number, default: 0 }
 }, { timestamps: true });
 
-SubscriptionPlanSchema.index({ name: 1 });
 SubscriptionPlanSchema.index({ isActive: 1, sortOrder: 1 });
 
 export default (mongoose.models.SubscriptionPlan as Model<ISubscriptionPlan>) || 

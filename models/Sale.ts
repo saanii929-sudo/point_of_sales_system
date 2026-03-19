@@ -73,6 +73,5 @@ const SaleSchema = new Schema<ISale>({
 SaleSchema.index({ tenantId: 1, createdAt: -1 });
 SaleSchema.index({ tenantId: 1, cashier: 1 });
 SaleSchema.index({ tenantId: 1, customer: 1 });
-SaleSchema.index({ saleNumber: 1 }, { unique: true });
 
 export default (mongoose.models.Sale as Model<ISale>) || mongoose.model<ISale>('Sale', SaleSchema);

@@ -32,7 +32,7 @@ export function useServiceWorker() {
   }, []);
 
   const prefetchForOffline = () => {
-    if (!navigator.serviceWorker.controller) return;
+    if (typeof navigator === 'undefined' || !navigator.serviceWorker?.controller) return;
     // Cache all pages
     navigator.serviceWorker.controller.postMessage({ type: 'PREFETCH_PAGES' });
     // Cache API data
@@ -40,7 +40,7 @@ export function useServiceWorker() {
   };
 
   const clearCache = () => {
-    if (!navigator.serviceWorker.controller) return;
+    if (typeof navigator === 'undefined' || !navigator.serviceWorker?.controller) return;
     navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_CACHE' });
   };
 
