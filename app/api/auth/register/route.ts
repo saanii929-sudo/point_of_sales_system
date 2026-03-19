@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/db';
-import { hashPassword, generateToken, setAuthCookie } from '@/lib/auth';
+import { hashPassword, generateToken, setAuthCookieOnResponse } from '@/lib/auth';
 import User from '@/models/User';
 import Business from '@/models/Business';
 
@@ -63,9 +63,7 @@ export async function POST(req: NextRequest) {
       email: user.email
     });
 
-    await setAuthCookie(token);
-
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       user: {
         id: user._id,
@@ -79,6 +77,8 @@ export async function POST(req: NextRequest) {
         name: business.name
       }
     });
+    setAuthCookieOnResponse(response, token);
+    return response;
   } catch (error: any) {
     console.error('Registration error:', error);
     return NextResponse.json(

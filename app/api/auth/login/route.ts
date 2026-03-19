@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/db';
-import { verifyPassword, generateToken, setAuthCookie } from '@/lib/auth';
+import { verifyPassword, generateToken, setAuthCookieOnResponse } from '@/lib/auth';
 import User from '@/models/User';
 import Business from '@/models/Business';
 
@@ -65,11 +65,10 @@ export async function POST(req: NextRequest) {
     });
 
     console.log('Token generated, setting cookie...');
-    await setAuthCookie(token);
 
     console.log('Login successful for:', email);
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       user: {
         id: user._id,
@@ -79,6 +78,8 @@ export async function POST(req: NextRequest) {
         tenantId: user.tenantId
       }
     });
+    setAuthCookieOnResponse(response, token);
+    return response;
   } catch (error: any) {
     console.error('Login error:', error);
     return NextResponse.json(
