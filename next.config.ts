@@ -1,7 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  css: {
+    // Use PostCSS pipeline for Tailwind v3 compatibility
+    postcss: true,
+  },
 };
 
 export default nextConfig;
