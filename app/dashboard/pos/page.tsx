@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { Card } from '@/components/ui/Card';
 import { useCartStore } from '@/store/useCartStore';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
@@ -9,61 +9,118 @@ import { ReceiptPreview } from '@/components/pos/ReceiptPreview';
 import { HeldCartsModal } from '@/components/pos/HeldCartsModal';
 import { CalculatorModal } from '@/components/pos/CalculatorModal';
 import { addOfflineSale, holdCart, syncOfflineSales } from '@/lib/indexedDB';
+import { getCachedData } from '@/lib/offlineDataCache';
 import toast from 'react-hot-toast';
 import {
-  Wifi, WifiOff, Package, ShoppingCart, User, FileText,
+  Package, ShoppingCart, User, FileText,
   X, CheckCircle2, Calculator, Search, Banknote, CreditCard,
   SplitSquareHorizontal, Minus, Plus, Tag, Zap, Layers,
-  ChevronDown, ChevronUp, ScanBarcode
+  ChevronDown, ChevronUp, ScanBarcode, CloudOff,
 } from 'lucide-react';
 
 interface Product {
-  _id: string;
-  name: string;
-  price: number;
-  cost: number;
-  stock: number;
+  _id:      string;
+  name:     string;
+  price:    number;
+  cost:     number;
+  stock:    number;
   category: { name: string; color: string };
 }
 
 function getInitials(name: string) {
-  return name.split(' ').slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+  return name.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase();
 }
 
 export default function POSPage() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [search, setSearch] = useState('');
-  const [barcodeBuffer, setBarcodeBuffer] = useState('');
-  const [lastKeyTime, setLastKeyTime] = useState(0);
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'split'>('cash');
-  const [splitPayment, setSplitPayment] = useState({ cash: 0, card: 0 });
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [showReceipt, setShowReceipt] = useState(false);
-  const [showHeldCarts, setShowHeldCarts] = useState(false);
-  const [lastSale, setLastSale] = useState<any>(null);
-  const [customerInfo, setCustomerInfo] = useState({ name: '', phone: '', email: '' });
-  const [discountCode, setDiscountCode] = useState('');
-  const [appliedDiscount, setAppliedDiscount] = useState<any>(null);
-  const [isApplyingDiscount, setIsApplyingDiscount] = useState(false);
-  const [showCalculator, setShowCalculator] = useState(false);
-  const [showCustomer, setShowCustomer] = useState(false);
-  const [categoryFilter, setCategoryFilter] = useState('');
+  const [products,          setProducts]          = useState<Product[]>([]);
+  const [productsLoading,   setProductsLoading]   = useState(true);
+  const [search,            setSearch]            = useState('');
+  const [barcodeBuffer,     setBarcodeBuffer]     = useState('');
+  const [lastKeyTime,       setLastKeyTime]       = useState(0);
+  const [paymentMethod,     setPaymentMethod]     = useState<'cash' | 'card' | 'split'>('cash');
+  const [splitPayment,      setSplitPayment]      = useState({ cash: 0, card: 0 });
+  const [isProcessing,      setIsProcessing]      = useState(false);
+  const [showReceipt,       setShowReceipt]       = useState(false);
+  const [showHeldCarts,     setShowHeldCarts]     = useState(false);
+  const [lastSale,          setLastSale]          = useState<any>(null);
+  const [customerInfo,      setCustomerInfo]      = useState({ name: '', phone: '', email: '' });
+  const [discountCode,      setDiscountCode]      = useState('');
+  const [appliedDiscount,   setAppliedDiscount]   = useState<any>(null);
+  const [isApplyingDiscount,setIsApplyingDiscount]= useState(false);
+  const [showCalculator,    setShowCalculator]    = useState(false);
+  const [showCustomer,      setShowCustomer]      = useState(false);
+  const [categoryFilter,    setCategoryFilter]    = useState('');
+  const [fromCache,         setFromCache]         = useState(false);
 
   const isOnline = useOnlineStatus();
-  const { items, addItem, removeItem, updateQuantity, clearCart, getSubtotal, getTax, getTotal } = useCartStore();
+  const searchRef = useRef(search);
+  searchRef.current = search;
+
+  const {
+    items, addItem, removeItem, updateQuantity,
+    clearCart, getSubtotal, getTax, getTotal,
+  } = useCartStore();
 
   useKeyboardShortcuts(POS_SHORTCUTS, true);
 
+  // ── Sync offline sales whenever we come online ─────────
+  useEffect(() => {
+    if (!isOnline) return;
+    syncOfflineSales().then(results => {
+      const synced = results.filter((r: any) => r.success).length;
+      if (synced > 0) toast.success(`Synced ${synced} offline sale${synced > 1 ? 's' : ''}`);
+    });
+  }, [isOnline]);
+
+  // ── Fetch products with debounce ───────────────────────
+  const fetchProducts = useCallback(async () => {
+    setProductsLoading(true);
+    try {
+      if (isOnline) {
+        const res  = await fetch(`/api/products?search=${encodeURIComponent(searchRef.current)}`);
+        const data = await res.json();
+        setProducts(data.products || []);
+        setFromCache(false);
+      } else {
+        // Serve from IndexedDB cache when offline
+        const cached = await getCachedData('cached-products');
+        if (cached?.products) {
+          const q = searchRef.current.toLowerCase();
+          const filtered: Product[] = q
+            ? cached.products.filter((p: Product) =>
+                p.name.toLowerCase().includes(q) ||
+                p.category?.name?.toLowerCase().includes(q)
+              )
+            : cached.products;
+          setProducts(filtered);
+          setFromCache(true);
+        } else {
+          setProducts([]);
+          toast('No offline data — connect to the internet first.', { icon: '📡' });
+        }
+      }
+    } catch {
+      toast.error('Failed to load products');
+      setProducts([]);
+    } finally {
+      setProductsLoading(false);
+    }
+  }, [isOnline]);
+
+  // Re-fetch when online status changes (immediate) or search changes (debounced)
   useEffect(() => {
     fetchProducts();
-    if (isOnline) {
-      syncOfflineSales().then((results) => {
-        const synced = results.filter((r: any) => r.success).length;
-        if (synced > 0) toast.success(`Synced ${synced} offline sale${synced > 1 ? 's' : ''}`);
-      });
-    }
-  }, [search, isOnline]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnline]);
 
+  useEffect(() => {
+    setProductsLoading(true);
+    const t = setTimeout(fetchProducts, search ? 300 : 0);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
+
+  // ── Barcode scanner listener ───────────────────────────
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
       const now = Date.now();
@@ -73,16 +130,18 @@ export default function POSPage() {
         handleBarcodeScanned(barcodeBuffer);
         setBarcodeBuffer('');
       } else if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
-        setBarcodeBuffer((prev) => prev + e.key);
+        setBarcodeBuffer(prev => prev + e.key);
       }
     };
     window.addEventListener('keypress', handleKeyPress);
     return () => window.removeEventListener('keypress', handleKeyPress);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [barcodeBuffer, lastKeyTime]);
 
+  // ─────────────────────────────────────────────────────
   const handleBarcodeScanned = async (barcode: string) => {
     try {
-      const res = await fetch(`/api/products?barcode=${barcode}`);
+      const res  = await fetch(`/api/products?barcode=${barcode}`);
       const data = await res.json();
       if (data.products?.length > 0) {
         handleAddToCart(data.products[0]);
@@ -93,82 +152,106 @@ export default function POSPage() {
     } catch { toast.error('Scan failed'); }
   };
 
-  const fetchProducts = async () => {
-    try {
-      const res = await fetch(`/api/products?search=${search}`);
-      const data = await res.json();
-      setProducts(data.products || []);
-    } catch { toast.error('Failed to load products'); }
-  };
-
   const handleAddToCart = (product: Product) => {
     if (product.stock <= 0) { toast.error('Out of stock'); return; }
-    addItem({ id: product._id, name: product.name, price: product.price, cost: product.cost, quantity: 1, stock: product.stock });
+    addItem({
+      id: product._id, name: product.name,
+      price: product.price, cost: product.cost,
+      quantity: 1, stock: product.stock,
+    });
   };
 
   const handleHoldCart = async () => {
     if (!items.length) { toast.error('Cart is empty'); return; }
     try {
-      await holdCart({ items, discount: getDiscountAmount() });
-      toast.success('Cart held');
-      clearCart(); setAppliedDiscount(null); setDiscountCode('');
+      await holdCart({
+        items,
+        discount:     getDiscountAmount(),
+        customerInfo: hasCustomer ? customerInfo : undefined,
+      });
+      toast.success('Cart held — come back to it anytime');
+      clearCart();
+      setAppliedDiscount(null);
+      setDiscountCode('');
+      setCustomerInfo({ name: '', phone: '', email: '' });
     } catch { toast.error('Failed to hold cart'); }
   };
 
   const handleResumeCart = (cart: any) => {
     clearCart();
-    cart.items.forEach((item: any) => addItem(item));
+    // Re-add with correct quantities
+    cart.items.forEach((item: any) => {
+      addItem(item);
+      if (item.quantity > 1) updateQuantity(item.id, item.quantity);
+    });
+    // Restore customer info if saved with cart
+    if (cart.customerInfo?.name || cart.customerInfo?.phone) {
+      setCustomerInfo(cart.customerInfo);
+      setShowCustomer(true);
+    }
   };
 
   const handleCheckout = async () => {
     if (!items.length) { toast.error('Cart is empty'); return; }
     if (paymentMethod === 'split') {
-      const total = getFinalTotal();
-      if (Math.abs(splitPayment.cash + splitPayment.card - total) > 0.01) {
-        toast.error('Split amounts must equal total'); return;
+      if (Math.abs(splitPayment.cash + splitPayment.card - getFinalTotal()) > 0.01) {
+        toast.error('Split amounts must equal the total'); return;
       }
     }
     setIsProcessing(true);
 
     const saleData = {
       items,
-      subtotal: getSubtotal(),
-      total: getTotal(),
-      discount: getDiscountAmount(),
-      discountCode: appliedDiscount?.code || null,
-      discountId: appliedDiscount?.id || null,
-      tax: getTax(),
+      subtotal:       getSubtotal(),
+      total:          getFinalTotal(),
+      discount:       getDiscountAmount(),
+      discountCode:   appliedDiscount?.code   || null,
+      discountId:     appliedDiscount?.id     || null,
+      tax:            getTax(),
       paymentMethod,
       paymentDetails:
         paymentMethod === 'split' ? splitPayment
-        : paymentMethod === 'cash' ? { cash: getTotal() }
-        : { card: getTotal() },
+        : paymentMethod === 'cash'  ? { cash: getFinalTotal() }
+        : { card: getFinalTotal() },
       customerInfo: customerInfo.phone ? customerInfo : undefined,
+    };
+
+    const receiptBase = {
+      ...saleData,
+      items:        items.map(i => ({ name: i.name, quantity: i.quantity, price: i.price })),
+      discountCode: appliedDiscount?.code,
+    };
+
+    const resetForm = () => {
+      clearCart();
+      setCustomerInfo({ name: '', phone: '', email: '' });
+      setAppliedDiscount(null);
+      setDiscountCode('');
     };
 
     try {
       if (!isOnline) {
         await addOfflineSale(saleData);
-        toast.success('Saved offline — will sync when online');
-        setLastSale({ ...saleData, total: getTotal(), subtotal: getSubtotal(), items: items.map((i) => ({ name: i.name, quantity: i.quantity, price: i.price })), discountCode: appliedDiscount?.code });
+        toast.success('Saved offline — will sync when connected');
+        setLastSale({ ...receiptBase, saleNumber: undefined });
         setShowReceipt(true);
-        clearCart(); setCustomerInfo({ name: '', phone: '', email: '' }); setAppliedDiscount(null); setDiscountCode('');
+        resetForm();
       } else {
         const res = await fetch('/api/sales', {
-          method: 'POST',
+          method:  'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(saleData),
+          body:    JSON.stringify(saleData),
         });
         if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
         const data = await res.json();
         toast.success(`Sale complete! #${data.sale.saleNumber}`);
-        setLastSale({ ...saleData, total: getTotal(), subtotal: getSubtotal(), saleNumber: data.sale.saleNumber, items: items.map((i) => ({ name: i.name, quantity: i.quantity, price: i.price })), discountCode: appliedDiscount?.code });
+        setLastSale({ ...receiptBase, saleNumber: data.sale.saleNumber });
         setShowReceipt(true);
-        clearCart(); setCustomerInfo({ name: '', phone: '', email: '' }); setAppliedDiscount(null); setDiscountCode('');
-        fetchProducts();
+        resetForm();
+        fetchProducts(); // refresh stock levels
       }
     } catch (error: any) {
-      toast.error(error.message);
+      toast.error(error.message || 'Checkout failed');
     } finally {
       setIsProcessing(false);
     }
@@ -179,48 +262,56 @@ export default function POSPage() {
     setIsApplyingDiscount(true);
     try {
       const res = await fetch('/api/discounts/verify', {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: discountCode, subtotal: getSubtotal(), items: items.map((i) => ({ product: i.id, price: i.price, quantity: i.quantity })), customerId: null }),
+        body:    JSON.stringify({
+          code:       discountCode,
+          subtotal:   getSubtotal(),
+          items:      items.map(i => ({ product: i.id, price: i.price, quantity: i.quantity })),
+          customerId: null,
+        }),
       });
       const data = await res.json();
-      if (data.valid) { setAppliedDiscount(data.discount); toast.success(`Discount applied: ${data.discount.name}`); }
-      else toast.error(data.error || 'Invalid code');
-    } catch { toast.error('Failed to verify code'); }
+      if (data.valid) {
+        setAppliedDiscount(data.discount);
+        toast.success(`Discount applied: ${data.discount.name}`);
+      } else {
+        toast.error(data.error || 'Invalid discount code');
+      }
+    } catch { toast.error('Could not verify discount code'); }
     finally { setIsApplyingDiscount(false); }
   };
 
-  const removeDiscount = () => { setAppliedDiscount(null); setDiscountCode(''); };
+  const removeDiscount   = () => { setAppliedDiscount(null); setDiscountCode(''); };
   const getDiscountAmount = () => appliedDiscount?.amount ?? 0;
-  const getFinalTotal = () => getTotal() - getDiscountAmount();
-  const handlePrintReceipt = () => { window.print(); setShowReceipt(false); };
+  const getFinalTotal    = () => Math.max(0, getTotal() - getDiscountAmount());
 
-  const categories = useMemo(() => [...new Set(products.map((p) => p.category.name))], [products]);
+  // Auto-fill card amount when cash portion changes in split mode
+  const handleSplitCashChange = (cash: number) => {
+    const card = Math.max(0, parseFloat((getFinalTotal() - cash).toFixed(2)));
+    setSplitPayment({ cash, card });
+  };
 
-  const filteredProducts = useMemo(() =>
-    products.filter((p) => !categoryFilter || p.category.name === categoryFilter),
+  const categories = useMemo(
+    () => [...new Set(products.map(p => p.category.name))],
+    [products]
+  );
+
+  const filteredProducts = useMemo(
+    () => products.filter(p => !categoryFilter || p.category.name === categoryFilter),
     [products, categoryFilter]
   );
 
-  const cartCount = items.reduce((s, i) => s + i.quantity, 0);
+  const cartCount  = items.reduce((s, i) => s + i.quantity, 0);
   const hasCustomer = customerInfo.name || customerInfo.phone;
 
   return (
     <div className="h-[calc(100vh-4.5rem)] flex flex-col lg:flex-row gap-4 overflow-hidden">
 
-      <div className="fixed top-[72px] right-5 z-50">
-        <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold shadow-sm ${
-          isOnline
-            ? 'bg-emerald-500 text-white'
-            : 'bg-red-500 text-white'
-        }`}>
-          {isOnline ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
-          {isOnline ? 'Online' : 'Offline'}
-        </span>
-      </div>
-
+      {/* ── Left: Product panel ─────────────────────────────── */}
       <div className="flex-1 flex flex-col min-h-0 min-w-0">
 
+        {/* Search + held carts */}
         <div className="flex items-center gap-3 mb-3">
           <div className="relative flex-1">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-tertiary)] pointer-events-none" />
@@ -228,7 +319,7 @@ export default function POSPage() {
               type="text"
               placeholder="Search products or scan barcode… (Ctrl+F)"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={e => setSearch(e.target.value)}
               className="w-full pl-10 pr-10 py-2.5 text-sm rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]/20 focus:border-[var(--primary-color)] transition-all"
             />
             <ScanBarcode className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-tertiary)]" />
@@ -243,6 +334,15 @@ export default function POSPage() {
           </button>
         </div>
 
+        {/* Offline cache notice */}
+        {fromCache && (
+          <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/50 text-xs font-medium text-amber-700 dark:text-amber-400">
+            <CloudOff className="w-3.5 h-3.5 flex-shrink-0" />
+            Showing cached products — prices may not reflect latest changes
+          </div>
+        )}
+
+        {/* Category filters */}
         {categories.length > 0 && (
           <div className="flex gap-2 mb-3 overflow-x-auto pb-1 scrollbar-hide">
             <button
@@ -255,18 +355,19 @@ export default function POSPage() {
             >
               All
             </button>
-            {categories.map((cat) => {
-              const catColor = products.find((p) => p.category.name === cat)?.category.color;
+            {categories.map(cat => {
+              const catColor = products.find(p => p.category.name === cat)?.category.color;
+              const active   = categoryFilter === cat;
               return (
                 <button
                   key={cat}
-                  onClick={() => setCategoryFilter(cat === categoryFilter ? '' : cat)}
+                  onClick={() => setCategoryFilter(active ? '' : cat)}
                   className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all flex-shrink-0 ${
-                    categoryFilter === cat
+                    active
                       ? 'text-white'
                       : 'bg-[var(--bg-surface)] border border-[var(--border-default)] text-[var(--text-secondary)] hover:border-[var(--border-strong)]'
                   }`}
-                  style={categoryFilter === cat ? { backgroundColor: catColor } : {}}
+                  style={active ? { backgroundColor: catColor } : {}}
                 >
                   {cat}
                 </button>
@@ -274,20 +375,30 @@ export default function POSPage() {
             })}
           </div>
         )}
+
+        {/* Product grid */}
         <div className="flex-1 overflow-y-auto pr-1">
-          {filteredProducts.length === 0 ? (
+          {productsLoading ? (
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="skeleton rounded-2xl h-28" />
+              ))}
+            </div>
+          ) : filteredProducts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 gap-3">
               <div className="w-12 h-12 rounded-2xl bg-[var(--bg-surface-3)] flex items-center justify-center">
                 <Package className="w-6 h-6 text-[var(--text-tertiary)]" />
               </div>
-              <p className="text-sm text-[var(--text-secondary)]">No products found</p>
+              <p className="text-sm text-[var(--text-secondary)]">
+                {search ? `No products matching "${search}"` : 'No products found'}
+              </p>
             </div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {filteredProducts.map((product) => {
+              {filteredProducts.map(product => {
                 const outOfStock = product.stock <= 0;
-                const lowStock = !outOfStock && product.stock <= 10;
-                const inCart = items.find((i) => i.id === product._id);
+                const lowStock   = !outOfStock && product.stock <= 10;
+                const inCart     = items.find(i => i.id === product._id);
 
                 return (
                   <button
@@ -305,15 +416,13 @@ export default function POSPage() {
                     <div className="p-3">
                       <div
                         className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-bold mb-2.5"
-                        style={{ backgroundColor: product.category.color + 'cc' }}
+                        style={{ backgroundColor: (product.category.color ?? '#10b981') + 'cc' }}
                       >
                         {getInitials(product.name)}
                       </div>
-
                       <p className="text-sm font-semibold text-[var(--text-primary)] leading-tight line-clamp-2 mb-1.5">
                         {product.name}
                       </p>
-
                       <div className="flex items-end justify-between gap-1">
                         <p className="text-base font-bold text-[var(--primary-color)] tabular-nums leading-none">
                           GH₵{product.price.toFixed(2)}
@@ -321,7 +430,7 @@ export default function POSPage() {
                         <p className={`text-xs font-medium leading-none ${
                           outOfStock ? 'text-red-500' : lowStock ? 'text-amber-500' : 'text-[var(--text-tertiary)]'
                         }`}>
-                          {outOfStock ? 'Out' : `${product.stock}`}
+                          {outOfStock ? 'Out' : product.stock}
                         </p>
                       </div>
                     </div>
@@ -343,24 +452,29 @@ export default function POSPage() {
             </div>
           )}
         </div>
+
+        {/* Keyboard shortcut bar */}
         <div className="mt-3 flex items-center gap-4 px-3 py-2 rounded-xl bg-[var(--bg-surface-2)] border border-[var(--border-subtle)] overflow-x-auto">
           <p className="text-xs font-semibold text-[var(--text-tertiary)] whitespace-nowrap flex-shrink-0">Shortcuts:</p>
           {[
-            ['Ctrl+F', 'Search'],
-            ['Ctrl+↵', 'Checkout'],
-            ['Ctrl+H', 'Hold'],
-            ['Ctrl+R', 'Resume'],
-            ['Ctrl+P', 'Print'],
+            ['Ctrl+F',     'Search'],
+            ['Ctrl+↵',    'Checkout'],
+            ['Ctrl+H',     'Hold'],
+            ['Ctrl+R',     'Resume'],
             ['Ctrl+⇧+C', 'Calc'],
-            ['ESC', 'Clear'],
+            ['ESC',        'Clear'],
           ].map(([key, label]) => (
             <span key={key} className="text-xs text-[var(--text-tertiary)] whitespace-nowrap flex-shrink-0">
-              <kbd className="px-1.5 py-0.5 rounded bg-[var(--bg-surface-3)] border border-[var(--border-default)] font-mono text-[10px] font-medium text-[var(--text-secondary)]">{key}</kbd>
-              {' '}{label}
+              <kbd className="px-1.5 py-0.5 rounded bg-[var(--bg-surface-3)] border border-[var(--border-default)] font-mono text-[10px] font-medium text-[var(--text-secondary)]">
+                {key}
+              </kbd>{' '}
+              {label}
             </span>
           ))}
         </div>
       </div>
+
+      {/* ── Right: Cart panel ────────────────────────────────── */}
       <div className="w-full lg:w-[360px] xl:w-[380px] flex flex-col min-h-0 flex-shrink-0">
         <Card className="flex-1 flex flex-col overflow-hidden">
 
@@ -400,7 +514,7 @@ export default function POSPage() {
           {/* Scrollable body */}
           <div className="flex-1 overflow-y-auto">
 
-            {/* ── Cart items ── */}
+            {/* Cart items */}
             <div className="px-4 py-3">
               {items.length === 0 ? (
                 <div className="flex flex-col items-center gap-2 py-10">
@@ -411,7 +525,7 @@ export default function POSPage() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {items.map((item) => (
+                  {items.map(item => (
                     <div
                       key={item.id}
                       className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-[var(--bg-surface-2)] border border-[var(--border-subtle)] group"
@@ -421,7 +535,9 @@ export default function POSPage() {
                         <p className="text-xs text-[var(--text-tertiary)] tabular-nums">
                           GH₵{item.price.toFixed(2)} × {item.quantity}
                           {' = '}
-                          <span className="font-semibold text-[var(--text-secondary)]">GH₵{(item.price * item.quantity).toFixed(2)}</span>
+                          <span className="font-semibold text-[var(--text-secondary)]">
+                            GH₵{(item.price * item.quantity).toFixed(2)}
+                          </span>
                         </p>
                       </div>
 
@@ -459,28 +575,28 @@ export default function POSPage() {
 
             {items.length > 0 && (
               <>
-                {/* ── Customer (collapsible) ── */}
+                {/* Customer (collapsible) */}
                 <div className="mx-4 mb-2 rounded-xl border border-[var(--border-subtle)] overflow-hidden">
                   <button
-                    onClick={() => setShowCustomer((v) => !v)}
+                    onClick={() => setShowCustomer(v => !v)}
                     className="w-full flex items-center justify-between px-3.5 py-2.5 bg-[var(--bg-surface-2)] hover:bg-[var(--bg-surface-3)] transition-colors"
                   >
                     <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text-secondary)]">
                       <User className="w-3.5 h-3.5" />
                       Customer
-                      {hasCustomer && (
-                        <span className="w-2 h-2 rounded-full bg-[var(--primary-color)]" />
-                      )}
+                      {hasCustomer && <span className="w-2 h-2 rounded-full bg-[var(--primary-color)]" />}
                       <span className="text-xs font-normal text-[var(--text-tertiary)]">(optional)</span>
                     </div>
-                    {showCustomer ? <ChevronUp className="w-3.5 h-3.5 text-[var(--text-tertiary)]" /> : <ChevronDown className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />}
+                    {showCustomer
+                      ? <ChevronUp   className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />
+                      : <ChevronDown className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />}
                   </button>
 
                   {showCustomer && (
                     <div className="px-3.5 py-3 space-y-2 border-t border-[var(--border-subtle)]">
                       {[
-                        { key: 'name', placeholder: 'Customer name', type: 'text' },
-                        { key: 'phone', placeholder: 'Phone number', type: 'tel' },
+                        { key: 'name',  placeholder: 'Customer name',   type: 'text'  },
+                        { key: 'phone', placeholder: 'Phone number',     type: 'tel'   },
                         { key: 'email', placeholder: 'Email (optional)', type: 'email' },
                       ].map(({ key, placeholder, type }) => (
                         <input
@@ -488,7 +604,7 @@ export default function POSPage() {
                           type={type}
                           placeholder={placeholder}
                           value={customerInfo[key as keyof typeof customerInfo]}
-                          onChange={(e) => setCustomerInfo({ ...customerInfo, [key]: e.target.value })}
+                          onChange={e => setCustomerInfo({ ...customerInfo, [key]: e.target.value })}
                           className="w-full px-3 py-2 text-sm rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]/20 focus:border-[var(--primary-color)] transition-all"
                         />
                       ))}
@@ -496,7 +612,7 @@ export default function POSPage() {
                   )}
                 </div>
 
-                {/* ── Discount ── */}
+                {/* Discount code */}
                 <div className="mx-4 mb-2">
                   {appliedDiscount ? (
                     <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/50">
@@ -519,7 +635,8 @@ export default function POSPage() {
                           type="text"
                           placeholder="Discount code"
                           value={discountCode}
-                          onChange={(e) => setDiscountCode(e.target.value.toUpperCase())}
+                          onChange={e => setDiscountCode(e.target.value.toUpperCase())}
+                          onKeyDown={e => e.key === 'Enter' && applyDiscount()}
                           className="w-full pl-8 pr-3 py-2 text-sm rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]/20 focus:border-[var(--primary-color)] transition-all uppercase tracking-wider"
                         />
                       </div>
@@ -534,17 +651,15 @@ export default function POSPage() {
                   )}
                 </div>
 
-                {/* ── Payment method ── */}
+                {/* Payment method */}
                 <div className="mx-4 mb-3">
                   <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wider mb-2">Payment</p>
                   <div className="grid grid-cols-3 gap-2">
-                    {(
-                      [
-                        { value: 'cash', label: 'Cash', Icon: Banknote },
-                        { value: 'card', label: 'Card', Icon: CreditCard },
-                        { value: 'split', label: 'Split', Icon: SplitSquareHorizontal },
-                      ] as const
-                    ).map(({ value, label, Icon }) => (
+                    {([
+                      { value: 'cash', label: 'Cash',  Icon: Banknote            },
+                      { value: 'card', label: 'Card',  Icon: CreditCard          },
+                      { value: 'split',label: 'Split', Icon: SplitSquareHorizontal },
+                    ] as const).map(({ value, label, Icon }) => (
                       <button
                         key={value}
                         onClick={() => setPaymentMethod(value)}
@@ -560,32 +675,37 @@ export default function POSPage() {
                     ))}
                   </div>
 
-                  {/* Split inputs */}
+                  {/* Split payment inputs */}
                   {paymentMethod === 'split' && (
                     <div className="grid grid-cols-2 gap-2 mt-2">
                       <div>
-                        <label className="block text-xs font-medium text-[var(--text-tertiary)] mb-1">Cash</label>
+                        <label className="block text-xs font-medium text-[var(--text-tertiary)] mb-1">Cash (GH₵)</label>
                         <input
                           type="number" min="0" step="0.01"
                           value={splitPayment.cash}
-                          onChange={(e) => setSplitPayment({ ...splitPayment, cash: Number(e.target.value) })}
+                          onChange={e => handleSplitCashChange(Number(e.target.value))}
                           className="w-full px-3 py-2 text-sm rounded-xl border-2 border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]/20 focus:border-[var(--primary-color)] transition-all tabular-nums"
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-[var(--text-tertiary)] mb-1">Card</label>
+                        <label className="block text-xs font-medium text-[var(--text-tertiary)] mb-1">Card (GH₵)</label>
                         <input
                           type="number" min="0" step="0.01"
                           value={splitPayment.card}
-                          onChange={(e) => setSplitPayment({ ...splitPayment, card: Number(e.target.value) })}
+                          onChange={e => setSplitPayment(p => ({ ...p, card: Number(e.target.value) }))}
                           className="w-full px-3 py-2 text-sm rounded-xl border-2 border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]/20 focus:border-[var(--primary-color)] transition-all tabular-nums"
                         />
                       </div>
+                      {Math.abs(splitPayment.cash + splitPayment.card - getFinalTotal()) > 0.01 && (
+                        <p className="col-span-2 text-xs text-amber-600 dark:text-amber-400 font-medium">
+                          Remaining: GH₵{(getFinalTotal() - splitPayment.cash - splitPayment.card).toFixed(2)}
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
 
-                {/* ── Order totals ── */}
+                {/* Order totals */}
                 <div className="mx-4 mb-3 rounded-xl border border-[var(--border-subtle)] overflow-hidden">
                   <div className="px-4 py-2.5 flex justify-between text-sm border-b border-[var(--border-subtle)]">
                     <span className="text-[var(--text-secondary)]">Subtotal</span>
@@ -598,19 +718,23 @@ export default function POSPage() {
                   {appliedDiscount && (
                     <div className="px-4 py-2.5 flex justify-between text-sm border-b border-[var(--border-subtle)]">
                       <span className="text-emerald-600 dark:text-emerald-400">Discount ({appliedDiscount.code})</span>
-                      <span className="font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">−GH₵{getDiscountAmount().toFixed(2)}</span>
+                      <span className="font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                        −GH₵{getDiscountAmount().toFixed(2)}
+                      </span>
                     </div>
                   )}
                   <div className="px-4 py-3 flex justify-between items-center bg-[var(--bg-surface-2)]">
                     <span className="text-base font-bold text-[var(--text-primary)]">Total</span>
-                    <span className="text-2xl font-bold text-[var(--primary-color)] tabular-nums">GH₵{getFinalTotal().toFixed(2)}</span>
+                    <span className="text-2xl font-bold text-[var(--primary-color)] tabular-nums">
+                      GH₵{getFinalTotal().toFixed(2)}
+                    </span>
                   </div>
                 </div>
               </>
             )}
           </div>
 
-          {/* ── Checkout footer ── */}
+          {/* Checkout footer */}
           <div className="px-4 pb-4 pt-2 flex-shrink-0 border-t border-[var(--border-subtle)] space-y-2">
             <button
               onClick={handleCheckout}
@@ -644,7 +768,7 @@ export default function POSPage() {
         </Card>
       </div>
 
-      {/* ── Modals ── */}
+      {/* ── Modals ────────────────────────────────────────────── */}
       {showReceipt && lastSale && (
         <ReceiptPreview
           items={lastSale.items}
@@ -654,20 +778,23 @@ export default function POSPage() {
           discountCode={lastSale.discountCode}
           total={lastSale.total}
           paymentMethod={lastSale.paymentMethod}
+          saleNumber={lastSale.saleNumber}
           onClose={() => setShowReceipt(false)}
-          onPrint={handlePrintReceipt}
+          onPrint={() => setShowReceipt(false)}
         />
       )}
+
       {showHeldCarts && (
         <HeldCartsModal onClose={() => setShowHeldCarts(false)} onResume={handleResumeCart} />
       )}
+
       {showCalculator && (
         <CalculatorModal
           total={getFinalTotal()}
           onClose={() => setShowCalculator(false)}
-          onConfirm={(paid: number, change: number) => {
-            toast.success(`Paid GH₵${paid.toFixed(2)} · Change GH₵${change.toFixed(2)}`);
-          }}
+          onConfirm={(paid, change) =>
+            toast.success(`Cash GH₵${paid.toFixed(2)} · Change GH₵${change.toFixed(2)}`)
+          }
         />
       )}
     </div>

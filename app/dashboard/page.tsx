@@ -293,9 +293,11 @@ export default function DashboardPage() {
     {
       title: 'Net Profit',
       value: `GH₵${data.summary.totalProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-      change: '+8.1%', up: true,
+      change: data.summary.totalProfit >= 0 ? 'Positive' : 'Below cost',
+      up: data.summary.totalProfit >= 0,
       icon: <TrendingUp style={{ width: 20, height: 20 }} />,
-      iconBg: '#eff6ff', iconColor: '#3b82f6',
+      iconBg: data.summary.totalProfit >= 0 ? '#eff6ff' : '#fef2f2',
+      iconColor: data.summary.totalProfit >= 0 ? '#3b82f6' : '#dc2626',
     },
     {
       title: 'Transactions',

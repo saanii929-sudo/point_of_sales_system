@@ -1,5 +1,5 @@
 // IndexedDB for offline sales queue
-import { openDB, DBSchema, IDBPDatabase } from 'idb';
+import { openDB, IDBPDatabase } from 'idb';
 
 interface OfflineSale {
   id: string;
@@ -15,29 +15,11 @@ interface OfflineSale {
   synced: boolean;
 }
 
-interface PosDB extends DBSchema {
-  'offline-sales': {
-    key: string;
-    value: OfflineSale;
-    indexes: { 'by-synced': boolean };
-  };
-  'held-carts': {
-    key: string;
-    value: {
-      id: string;
-      items: any[];
-      discount: number;
-      customerInfo?: any;
-      timestamp: number;
-    };
-  };
-}
-
-let dbPromise: Promise<IDBPDatabase<PosDB>> | null = null;
+let dbPromise: Promise<IDBPDatabase> | null = null;
 
 export async function getDB() {
   if (!dbPromise) {
-    dbPromise = openDB<PosDB>('pos-system', 1, {
+    dbPromise = openDB('pos-system', 1, {
       upgrade(db) {
         // Offline sales store
         const offlineSalesStore = db.createObjectStore('offline-sales', {
@@ -148,7 +130,7 @@ export async function syncOfflineSales() {
         });
 
         if (response.ok) {
-          await markSaleSynced(sale.id);
+          await deleteOfflineSale(sale.id);   // remove from queue once synced
           results.push({ id: sale.id, success: true });
         } else {
           results.push({ id: sale.id, success: false, error: 'API error' });

@@ -174,7 +174,7 @@ LoyaltyProgramSchema.methods.getPointsMultiplier = function(): number {
     gold: 1.5,
     platinum: 2
   };
-  return multipliers[this.tier];
+  return multipliers[this.tier as keyof typeof multipliers];
 };
 
 // Check if birthday reward is available

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import mongoose from 'mongoose';
 import { connectDB } from '@/lib/db';
 import { getSession } from '@/lib/auth';
 import Sale from '@/models/Sale';
@@ -15,16 +16,29 @@ export async function GET() {
     await connectDB();
 
     const now = new Date();
-    const lastMonth = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const lastMonth    = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     const twoMonthsAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+
+    // MongoDB aggregation does NOT auto-cast strings → must use ObjectId explicitly
+    const tenantOid = session.tenantId
+      ? new mongoose.Types.ObjectId(session.tenantId as string)
+      : null;
+
+    // If there's no valid tenant (e.g. super_admin without a business), return neutral metrics
+    if (!tenantOid) {
+      return NextResponse.json({
+        metrics:      { salesTrend: 0, stockHealth: 100, customerRetention: 0, profitMargin: 0 },
+        overallScore: 50,
+      });
+    }
 
     // Sales Trend
     const currentMonthSales = await Sale.aggregate([
       {
         $match: {
-          tenantId: session.tenantId,
+          tenantId: tenantOid,
           createdAt: { $gte: lastMonth },
-          status: 'completed'
+          status: 'completed',
         }
       },
       { $group: { _id: null, total: { $sum: '$total' } } }
@@ -33,17 +47,24 @@ export async function GET() {
     const previousMonthSales = await Sale.aggregate([
       {
         $match: {
-          tenantId: session.tenantId,
+          tenantId: tenantOid,
           createdAt: { $gte: twoMonthsAgo, $lt: lastMonth },
-          status: 'completed'
+          status: 'completed',
         }
       },
       { $group: { _id: null, total: { $sum: '$total' } } }
     ]);
 
-    const currentTotal = currentMonthSales[0]?.total || 0;
-    const previousTotal = previousMonthSales[0]?.total || 1;
-    const salesTrend = ((currentTotal - previousTotal) / previousTotal) * 100;
+    const currentTotal  = currentMonthSales[0]?.total  || 0;
+    const previousTotal = previousMonthSales[0]?.total || 0;
+
+    // Avoid division-by-zero and misleading -100% on brand-new businesses
+    let salesTrend = 0;
+    if (previousTotal > 0) {
+      salesTrend = ((currentTotal - previousTotal) / previousTotal) * 100;
+    } else if (currentTotal > 0) {
+      salesTrend = 100; // First sales ever — all growth
+    }
 
     // Stock Health
     const products = await Product.find({

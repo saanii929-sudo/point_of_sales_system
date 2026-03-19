@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { Printer, X as XIcon } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { format } from 'date-fns';
 
@@ -20,6 +21,7 @@ interface ReceiptPreviewProps {
   paymentMethod: string;
   amountPaid?: number;
   change?: number;
+  saleNumber?: string;
   onClose: () => void;
   onPrint: () => void;
 }
@@ -43,11 +45,12 @@ export function ReceiptPreview({
   paymentMethod,
   amountPaid,
   change,
+  saleNumber,
   onClose,
   onPrint
 }: ReceiptPreviewProps) {
   const [branding, setBranding] = useState<BusinessBranding | null>(null);
-  const receiptNumber = `RCP-${Date.now().toString(36).toUpperCase()}`;
+  const receiptNumber = saleNumber ?? `RCP-${Date.now().toString(36).toUpperCase()}`;
 
   useEffect(() => {
     fetchBranding();
@@ -370,6 +373,7 @@ export function ReceiptPreview({
     printWindow.document.write(receiptHTML);
     printWindow.document.close();
 
+    // Close the preview modal — the popup handles the actual print
     onPrint();
   };
 
@@ -379,7 +383,9 @@ export function ReceiptPreview({
         <CardHeader>
           <div className="flex justify-between items-center">
             <h2 className="text-xl font-bold">Receipt Preview</h2>
-            <button onClick={onClose} className="text-2xl hover:text-red-600 transition-colors">×</button>
+            <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 text-[var(--text-tertiary)] hover:text-red-600 transition-colors">
+              <XIcon className="w-4 h-4" />
+            </button>
           </div>
         </CardHeader>
         <CardBody>
@@ -496,8 +502,9 @@ export function ReceiptPreview({
             <Button variant="ghost" onClick={onClose} className="flex-1">
               Close
             </Button>
-            <Button onClick={handlePrint} className="flex-1">
-              🖨️ Print Receipt
+            <Button onClick={handlePrint} className="flex-1 flex items-center gap-2 justify-center">
+              <Printer className="w-4 h-4" />
+              Print Receipt
             </Button>
           </div>
         </CardBody>

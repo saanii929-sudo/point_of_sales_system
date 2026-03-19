@@ -5,7 +5,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import toast from 'react-hot-toast';
 import {
   Settings, Palette, Image as ImageIcon, Upload, X, Lightbulb,
-  Building2, Lock, CheckCircle2, Loader2, Eye, Swatches,
+  Building2, Lock, CheckCircle2, Loader2, Eye,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────

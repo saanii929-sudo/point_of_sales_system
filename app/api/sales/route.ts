@@ -137,7 +137,8 @@ export async function POST(req: NextRequest) {
     // Create sale
     const subtotal = saleItems.reduce((sum, item) => sum + item.subtotal, 0);
     const total = subtotal + tax - discount;
-    const profit = calculateProfit(saleItems);
+    // Gross profit = (selling price − cost) per item, minus any discount given
+    const profit = calculateProfit(saleItems) - (discount || 0);
 
     const sale = await Sale.create({
       tenantId: session.tenantId,
