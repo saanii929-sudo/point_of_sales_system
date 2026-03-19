@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Card } from '@/components/ui/Card';
 import toast from 'react-hot-toast';
+import { fetchWithOfflineFallback } from '@/lib/offlineDataCache';
 import { format } from 'date-fns';
 import {
   Receipt, TrendingUp, CircleDollarSign, Users,
@@ -88,8 +89,7 @@ export default function SalesPage() {
   const fetchSales = async () => {
     try {
       setIsFetching(true);
-      const res = await fetch('/api/sales');
-      const data = await res.json();
+      const { data } = await fetchWithOfflineFallback('/api/sales');
       setSales(data.sales || []);
     } catch {
       toast.error('Failed to load sales');

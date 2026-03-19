@@ -1,33 +1,27 @@
 import { openDB, IDBPDatabase } from 'idb';
 
-interface OfflineDataDB {
-  'cached-products': { key: string; value: any };
-  'cached-categories': { key: string; value: any };
-  'cached-customers': { key: string; value: any };
-  'cached-branding': { key: string; value: any };
-  'cache-meta': { key: string; value: { key: string; timestamp: number } };
-}
+const DB_NAME = 'smartvendr-offline';
+const DB_VERSION = 2; // Bump version to trigger upgrade
+const DATA_STORE = 'api-cache';
+const META_STORE = 'cache-meta';
 
 let dbPromise: Promise<IDBPDatabase<any>> | null = null;
 
 function getOfflineDB() {
   if (!dbPromise) {
-    dbPromise = openDB('smartvendr-offline', 1, {
+    dbPromise = openDB(DB_NAME, DB_VERSION, {
       upgrade(db) {
-        if (!db.objectStoreNames.contains('cached-products')) {
-          db.createObjectStore('cached-products', { keyPath: 'key' });
+        // Clean up old v1 stores
+        for (const name of Array.from(db.objectStoreNames)) {
+          if (name !== DATA_STORE && name !== META_STORE) {
+            db.deleteObjectStore(name);
+          }
         }
-        if (!db.objectStoreNames.contains('cached-categories')) {
-          db.createObjectStore('cached-categories', { keyPath: 'key' });
+        if (!db.objectStoreNames.contains(DATA_STORE)) {
+          db.createObjectStore(DATA_STORE);
         }
-        if (!db.objectStoreNames.contains('cached-customers')) {
-          db.createObjectStore('cached-customers', { keyPath: 'key' });
-        }
-        if (!db.objectStoreNames.contains('cached-branding')) {
-          db.createObjectStore('cached-branding', { keyPath: 'key' });
-        }
-        if (!db.objectStoreNames.contains('cache-meta')) {
-          db.createObjectStore('cache-meta', { keyPath: 'key' });
+        if (!db.objectStoreNames.contains(META_STORE)) {
+          db.createObjectStore(META_STORE);
         }
       },
     });
@@ -35,61 +29,63 @@ function getOfflineDB() {
   return dbPromise;
 }
 
-export async function cacheData(store: string, data: any) {
+export async function cacheData(key: string, data: any) {
   const db = await getOfflineDB();
-  await db.put(store as any, { key: store, data });
-  await db.put('cache-meta' as any, { key: store, timestamp: Date.now() });
+  await db.put(DATA_STORE, data, key);
+  await db.put(META_STORE, Date.now(), key);
 }
 
-export async function getCachedData(store: string) {
+export async function getCachedData(key: string) {
   const db = await getOfflineDB();
-  const result = await db.get(store as any, store);
-  return result?.data ?? null;
+  return (await db.get(DATA_STORE, key)) ?? null;
 }
 
-export async function getCacheMeta(store: string) {
+export async function getCacheMeta(key: string): Promise<number | null> {
   const db = await getOfflineDB();
-  return db.get('cache-meta' as any, store);
+  return (await db.get(META_STORE, key)) ?? null;
 }
 
 // Prefetch all critical data for offline use
 export async function prefetchOfflineData() {
-  const endpoints: { url: string; store: string }[] = [
-    { url: '/api/products', store: 'cached-products' },
-    { url: '/api/categories', store: 'cached-categories' },
-    { url: '/api/customers', store: 'cached-customers' },
-    { url: '/api/business/branding', store: 'cached-branding' },
+  const endpoints = [
+    '/api/products',
+    '/api/categories',
+    '/api/customers',
+    '/api/business/branding',
+    '/api/analytics/dashboard?period=today',
   ];
 
-  const results: { store: string; success: boolean }[] = [];
+  const results: { url: string; success: boolean }[] = [];
 
-  for (const { url, store } of endpoints) {
+  for (const url of endpoints) {
     try {
       const res = await fetch(url, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
-        await cacheData(store, data);
-        results.push({ store, success: true });
+        await cacheData(url, data);
+        results.push({ url, success: true });
       } else {
-        results.push({ store, success: false });
+        results.push({ url, success: false });
       }
     } catch {
-      results.push({ store, success: false });
+      results.push({ url, success: false });
     }
   }
 
   return results;
 }
 
-// Get data with offline fallback
-export async function fetchWithOfflineFallback(url: string, store: string) {
-  if (navigator.onLine) {
+// Get data with offline fallback — uses URL as cache key
+export async function fetchWithOfflineFallback(url: string, cacheKey?: string) {
+  const key = cacheKey || url;
+
+  if (typeof navigator !== 'undefined' && navigator.onLine) {
     try {
       const res = await fetch(url, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         // Update cache in background
-        cacheData(store, data).catch(() => {});
+        cacheData(key, data).catch(() => {});
         return { data, fromCache: false };
       }
     } catch {
@@ -98,7 +94,7 @@ export async function fetchWithOfflineFallback(url: string, store: string) {
   }
 
   // Offline or fetch failed — use cache
-  const cached = await getCachedData(store);
+  const cached = await getCachedData(key);
   if (cached) {
     return { data: cached, fromCache: true };
   }

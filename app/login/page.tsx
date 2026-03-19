@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/store/useAuthStore';
-import { useServiceWorker } from '@/hooks/useServiceWorker';
 import { prefetchOfflineData } from '@/lib/offlineDataCache';
 import toast from 'react-hot-toast';
 import {
@@ -31,7 +30,6 @@ export default function LoginPage() {
   const [rememberMe,  setRememberMe]  = useState(false);
   const [formData,    setFormData]    = useState({ email: '', password: '' });
   const { theme, toggleTheme } = useThemeStore();
-  const { prefetchForOffline } = useServiceWorker();
   const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -77,8 +75,7 @@ export default function LoginPage() {
       setUser(data.user);
       toast.success('Welcome back! 🎉');
 
-      // Prefetch pages and data for offline use (non-blocking)
-      try { prefetchForOffline(); } catch {}
+      // Prefetch data for offline use (non-blocking)
       prefetchOfflineData().catch(() => {});
 
       const roleMap: Record<string, string> = {

@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { BusinessHealthIndicator } from '@/components/dashboard/BusinessHealthIndicator';
 import { useAuthStore } from '@/store/useAuthStore';
 import toast from 'react-hot-toast';
+import { fetchWithOfflineFallback } from '@/lib/offlineDataCache';
 import {
   AlertTriangle, TrendingUp, DollarSign, ShoppingCart, Users,
   RefreshCw, Pause, Play, Package, ArrowUpRight, ArrowDownRight,
@@ -191,20 +192,16 @@ export default function DashboardPage() {
 
   const fetchOutOfStockProducts = useCallback(async () => {
     try {
-      const res = await fetch('/api/products');
-      if (res.ok) {
-        const result = await res.json();
-        setOutOfStockProducts(result.products.filter((p: Product) => p.stock <= 0));
-      }
+      const { data: result } = await fetchWithOfflineFallback('/api/products');
+      setOutOfStockProducts((result.products || []).filter((p: Product) => p.stock <= 0));
     } catch { /* silent */ }
   }, []);
 
   const fetchDashboardData = useCallback(async (silent = false) => {
     try {
       if (!silent) setIsLoading(true);
-      const res = await fetch(`/api/analytics/dashboard?period=${period}`);
-      if (!res.ok) throw new Error('Failed to fetch data');
-      const result = await res.json();
+      const url = `/api/analytics/dashboard?period=${period}`;
+      const { data: result, fromCache } = await fetchWithOfflineFallback(url);
 
       const hasChanged = data && (
         data.summary.totalSales !== result.summary.totalSales ||
@@ -214,8 +211,11 @@ export default function DashboardPage() {
       setData(result);
       setLastUpdate(new Date());
 
-      if (!silent) toast.success('Dashboard updated', { duration: 2000 });
-      else if (hasChanged) {
+      if (fromCache) {
+        toast('Showing cached dashboard data', { icon: '📡', duration: 2000 });
+      } else if (!silent) {
+        toast.success('Dashboard updated', { duration: 2000 });
+      } else if (hasChanged) {
         toast.success('New data available', {
           duration: 2000, icon: '🔄',
           style: { background: '#10b981', color: '#fff' },

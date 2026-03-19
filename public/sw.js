@@ -1,6 +1,6 @@
-const CACHE_NAME = 'smartvendr-v1';
-const STATIC_CACHE = 'smartvendr-static-v1';
-const DATA_CACHE = 'smartvendr-data-v1';
+const CACHE_NAME = 'smartvendr-v2';
+const STATIC_CACHE = 'smartvendr-static-v2';
+const DATA_CACHE = 'smartvendr-data-v2';
 
 // App shell — pages and assets to cache for offline navigation
 const APP_SHELL = [
@@ -32,6 +32,7 @@ const CACHEABLE_API = [
   '/api/suppliers',
   '/api/employees',
   '/api/discounts',
+  '/api/sales',
   '/api/business/branding',
   '/api/analytics/dashboard',
   '/api/inventory/insights',

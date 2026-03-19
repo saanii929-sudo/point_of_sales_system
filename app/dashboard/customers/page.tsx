@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Card, CardBody } from '@/components/ui/Card';
 import toast from 'react-hot-toast';
+import { fetchWithOfflineFallback } from '@/lib/offlineDataCache';
 import { Users, Phone, Mail, DollarSign } from 'lucide-react';
 
 interface Customer {
@@ -24,8 +25,7 @@ export default function CustomersPage() {
 
   const fetchCustomers = async () => {
     try {
-      const res = await fetch('/api/customers');
-      const data = await res.json();
+      const { data } = await fetchWithOfflineFallback('/api/customers', 'cached-customers');
       setCustomers(data.customers || []);
     } catch (error) {
       toast.error('Failed to load customers');

@@ -83,7 +83,7 @@ export default function POSPage() {
         setFromCache(false);
       } else {
         // Serve from IndexedDB cache when offline
-        const cached = await getCachedData('cached-products');
+        const cached = await getCachedData('/api/products');
         if (cached?.products) {
           const q = searchRef.current.toLowerCase();
           const filtered: Product[] = q

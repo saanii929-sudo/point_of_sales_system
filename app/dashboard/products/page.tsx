@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import toast from 'react-hot-toast';
+import { fetchWithOfflineFallback } from '@/lib/offlineDataCache';
 import {
   Package, AlertTriangle, Download, Edit, Trash2, Plus, Search,
   X, Tag, Truck, Calendar, RefreshCw, ScanBarcode, ChevronDown,
@@ -130,9 +131,9 @@ export default function ProductsPage() {
 
   const fetchProducts = async () => {
     try {
-      const res = await fetch('/api/products');
-      const data = await res.json();
+      const { data, fromCache } = await fetchWithOfflineFallback('/api/products', 'cached-products');
       setProducts(data.products || []);
+      if (fromCache) toast('Showing cached products', { icon: '📡', duration: 2000 });
     } catch { toast.error('Failed to load products'); }
   };
 
@@ -146,8 +147,7 @@ export default function ProductsPage() {
 
   const fetchCategories = async () => {
     try {
-      const res = await fetch('/api/categories');
-      const data = await res.json();
+      const { data } = await fetchWithOfflineFallback('/api/categories', 'cached-categories');
       setCategories(data.categories || []);
     } catch { toast.error('Failed to load categories'); }
   };
