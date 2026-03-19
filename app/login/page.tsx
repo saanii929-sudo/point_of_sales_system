@@ -81,15 +81,13 @@ export default function LoginPage() {
       prefetchForOffline();
       prefetchOfflineData().catch(() => {});
 
-      await new Promise(r => setTimeout(r, 100));
-
       const roleMap: Record<string, string> = {
         super_admin:     '/superadmin',
         cashier:         '/dashboard/pos',
         inventory_staff: '/dashboard/products',
       };
-      router.push(roleMap[data.user.role] ?? '/dashboard');
-      router.refresh();
+      // Hard redirect ensures the browser sends the fresh cookie on the next request
+      window.location.href = roleMap[data.user.role] ?? '/dashboard';
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : 'Login failed';
       toast.error(msg);

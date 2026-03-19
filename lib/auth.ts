@@ -53,9 +53,12 @@ export async function getSession(): Promise<JWTPayload | null> {
   return verifyToken(token);
 }
 
+// Use HTTPS-based detection instead of NODE_ENV to support HTTP reverse proxies
+const isSecure = process.env.NEXT_PUBLIC_APP_URL?.startsWith('https://') ?? false;
+
 const COOKIE_OPTIONS = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
+  secure: isSecure,
   sameSite: 'lax' as const,
   maxAge: 60 * 60 * 24 * 7, // 7 days
   path: '/'
