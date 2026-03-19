@@ -77,8 +77,8 @@ export default function LoginPage() {
       setUser(data.user);
       toast.success('Welcome back! 🎉');
 
-      // Prefetch pages and data for offline use
-      prefetchForOffline();
+      // Prefetch pages and data for offline use (non-blocking)
+      try { prefetchForOffline(); } catch {}
       prefetchOfflineData().catch(() => {});
 
       const roleMap: Record<string, string> = {

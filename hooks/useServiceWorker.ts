@@ -12,36 +12,42 @@ export function useServiceWorker() {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
     registered.current = true;
 
-    navigator.serviceWorker
-      .register('/sw.js')
-      .then((reg) => {
-        console.log('[App] Service worker registered');
-        setIsReady(true);
+    try {
+      navigator.serviceWorker
+        .register('/sw.js')
+        .then((reg) => {
+          console.log('[App] Service worker registered');
+          setIsReady(true);
 
-        // Listen for prefetch completion
-        navigator.serviceWorker.addEventListener('message', (event) => {
-          if (event.data?.type === 'PREFETCH_COMPLETE') {
-            setIsPrefetched(true);
-            console.log('[App] Offline prefetch complete');
-          }
+          // Listen for prefetch completion
+          navigator.serviceWorker.addEventListener('message', (event) => {
+            if (event.data?.type === 'PREFETCH_COMPLETE') {
+              setIsPrefetched(true);
+              console.log('[App] Offline prefetch complete');
+            }
+          });
+        })
+        .catch((err) => {
+          console.warn('[App] SW registration failed:', err);
         });
-      })
-      .catch((err) => {
-        console.warn('[App] SW registration failed:', err);
-      });
+    } catch (err) {
+      console.warn('[App] SW not available:', err);
+    }
   }, []);
 
   const prefetchForOffline = () => {
-    if (typeof navigator === 'undefined' || !navigator.serviceWorker?.controller) return;
-    // Cache all pages
-    navigator.serviceWorker.controller.postMessage({ type: 'PREFETCH_PAGES' });
-    // Cache API data
-    navigator.serviceWorker.controller.postMessage({ type: 'PREFETCH_API' });
+    try {
+      if (typeof navigator === 'undefined' || !navigator.serviceWorker?.controller) return;
+      navigator.serviceWorker.controller.postMessage({ type: 'PREFETCH_PAGES' });
+      navigator.serviceWorker.controller.postMessage({ type: 'PREFETCH_API' });
+    } catch {}
   };
 
   const clearCache = () => {
-    if (typeof navigator === 'undefined' || !navigator.serviceWorker?.controller) return;
-    navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_CACHE' });
+    try {
+      if (typeof navigator === 'undefined' || !navigator.serviceWorker?.controller) return;
+      navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_CACHE' });
+    } catch {}
   };
 
   return { isReady, isPrefetched, prefetchForOffline, clearCache };

@@ -189,7 +189,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       else {
         fetchBranding();
         // Refresh offline data cache in background
-        prefetchOfflineData().catch(() => {});
+        try { prefetchOfflineData().catch(() => {}); } catch {}
       }
     }
   }, [user, router, isLoading, fetchBranding]);
