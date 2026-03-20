@@ -20,6 +20,10 @@ const APP_SHELL = [
   '/dashboard/suppliers',
   '/dashboard/expiring',
   '/dashboard/settings',
+  '/superadmin',
+  '/superadmin/businesses',
+  '/superadmin/contacts',
+  '/superadmin/plans',
   '/manifest.json',
   '/favicon.ico',
 ];
@@ -41,6 +45,10 @@ const CACHEABLE_API = [
   '/api/payroll',
   '/api/returns',
   '/api/products/expiring',
+  '/api/superadmin/stats',
+  '/api/superadmin/businesses',
+  '/api/superadmin/contacts',
+  '/api/superadmin/plans',
 ];
 
 // Install — cache the app shell
@@ -132,10 +140,14 @@ async function networkFirstWithCache(request, cacheName) {
     // For navigation requests, try the base path
     if (request.mode === 'navigate') {
       const url = new URL(request.url);
-      // Try cached version of the dashboard root for sub-routes
+      // Try cached version of the root for sub-routes
       if (url.pathname.startsWith('/dashboard')) {
         const dashCached = await caches.match('/dashboard');
         if (dashCached) return dashCached;
+      }
+      if (url.pathname.startsWith('/superadmin')) {
+        const superCached = await caches.match('/superadmin');
+        if (superCached) return superCached;
       }
     }
     // Return offline fallback

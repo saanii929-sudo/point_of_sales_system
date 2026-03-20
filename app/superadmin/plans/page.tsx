@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useAuthStore } from '@/store/useAuthStore';
 import toast from 'react-hot-toast';
+import { fetchWithOfflineFallback } from '@/lib/offlineDataCache';
 import { CheckCircle2, CreditCard, Plus, ArrowLeft } from 'lucide-react';
 
 interface SubscriptionPlan {
@@ -66,13 +67,8 @@ export default function SubscriptionPlansPage() {
 
   const fetchPlans = async () => {
     try {
-      const res = await fetch('/api/superadmin/plans');
-      if (res.ok) {
-        const data = await res.json();
-        setPlans(data.plans);
-      } else {
-        toast.error('Failed to load plans');
-      }
+      const { data } = await fetchWithOfflineFallback('/api/superadmin/plans');
+      setPlans(data.plans);
     } catch (error) {
       toast.error('Failed to load plans');
     } finally {

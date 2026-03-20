@@ -6,6 +6,7 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { useAuthStore } from '@/store/useAuthStore';
 import toast from 'react-hot-toast';
+import { fetchWithOfflineFallback } from '@/lib/offlineDataCache';
 import { format } from 'date-fns';
 import {
   Building2,
@@ -58,13 +59,8 @@ export default function SuperAdminDashboard() {
 
   const fetchStats = async () => {
     try {
-      const res = await fetch('/api/superadmin/stats');
-      if (res.ok) {
-        const data = await res.json();
-        setStats(data);
-      } else {
-        toast.error('Failed to load stats');
-      }
+      const { data } = await fetchWithOfflineFallback('/api/superadmin/stats');
+      setStats(data);
     } catch (error) {
       toast.error('Failed to load stats');
     } finally {

@@ -6,6 +6,7 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { useAuthStore } from '@/store/useAuthStore';
 import toast from 'react-hot-toast';
+import { fetchWithOfflineFallback, getCachedData } from '@/lib/offlineDataCache';
 import { format } from 'date-fns';
 
 interface ContactSubmission {
@@ -42,16 +43,24 @@ export default function ContactSubmissionsPage() {
 
   const fetchSubmissions = async () => {
     try {
-      const url = filter === 'all' 
+      const url = filter === 'all'
         ? '/api/superadmin/contacts'
         : `/api/superadmin/contacts?status=${filter}`;
-      
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
+
+      try {
+        const { data } = await fetchWithOfflineFallback(url);
         setSubmissions(data.submissions);
-      } else {
-        toast.error('Failed to load submissions');
+      } catch {
+        // Offline and filtered URL not cached — fall back to base cache and filter client-side
+        const cached = await getCachedData('/api/superadmin/contacts');
+        if (cached) {
+          const filtered = filter === 'all'
+            ? cached.submissions
+            : cached.submissions.filter((s: ContactSubmission) => s.status === filter);
+          setSubmissions(filtered);
+        } else {
+          toast.error('No data available offline');
+        }
       }
     } catch (error) {
       toast.error('Failed to load submissions');

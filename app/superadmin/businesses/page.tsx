@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useAuthStore } from '@/store/useAuthStore';
 import toast from 'react-hot-toast';
+import { fetchWithOfflineFallback, getCachedData } from '@/lib/offlineDataCache';
 import { format } from 'date-fns';
 
 interface Business {
@@ -44,16 +45,26 @@ export default function BusinessesManagement() {
 
   const fetchBusinesses = async (searchQuery = '') => {
     try {
-      const url = searchQuery 
+      const url = searchQuery
         ? `/api/superadmin/businesses?search=${encodeURIComponent(searchQuery)}`
         : '/api/superadmin/businesses';
-      
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
+
+      try {
+        const { data } = await fetchWithOfflineFallback(url);
         setBusinesses(data.businesses);
-      } else {
-        toast.error('Failed to load businesses');
+      } catch {
+        // Offline and specific URL not cached — fall back to base cache and filter client-side
+        const cached = await getCachedData('/api/superadmin/businesses');
+        if (cached) {
+          const filtered = searchQuery
+            ? cached.businesses.filter((b: Business) =>
+                b.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                b.email.toLowerCase().includes(searchQuery.toLowerCase()))
+            : cached.businesses;
+          setBusinesses(filtered);
+        } else {
+          toast.error('No data available offline');
+        }
       }
     } catch (error) {
       toast.error('Failed to load businesses');

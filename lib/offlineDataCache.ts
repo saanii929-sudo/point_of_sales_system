@@ -62,6 +62,10 @@ export async function prefetchOfflineData() {
     '/api/reports?range=month',
     '/api/inventory/insights',
     '/api/products/expiring',
+    '/api/superadmin/stats',
+    '/api/superadmin/businesses',
+    '/api/superadmin/contacts',
+    '/api/superadmin/plans',
   ];
 
   const results: { url: string; success: boolean }[] = [];
