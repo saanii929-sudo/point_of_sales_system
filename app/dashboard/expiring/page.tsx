@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import toast from 'react-hot-toast';
+import { fetchWithOfflineFallback } from '@/lib/offlineDataCache';
 import {
   AlertTriangle, Calendar, Package, RefreshCw,
   Clock, ShieldAlert, TrendingDown, CircleDollarSign,
@@ -52,8 +53,7 @@ export default function ExpiringProductsPage() {
   const fetchData = async () => {
     try {
       setIsLoading(true);
-      const res = await fetch('/api/products/expiring');
-      const result = await res.json();
+      const { data: result } = await fetchWithOfflineFallback('/api/products/expiring');
       setData(result);
     } catch {
       toast.error('Failed to load expiring products');

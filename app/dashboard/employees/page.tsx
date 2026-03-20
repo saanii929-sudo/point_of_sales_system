@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import toast from 'react-hot-toast';
+import { fetchWithOfflineFallback } from '@/lib/offlineDataCache';
 import {
   Users, UserPlus, Search, X, Mail, Phone, Shield, Briefcase,
   UserCheck, UserX, Loader2, ChevronDown,
@@ -123,8 +124,7 @@ export default function EmployeesPage() {
   const fetchEmployees = async () => {
     setIsFetching(true);
     try {
-      const res = await fetch('/api/employees');
-      const data = await res.json();
+      const { data } = await fetchWithOfflineFallback('/api/employees');
       setEmployees(data.employees || []);
     } catch {
       toast.error('Failed to load employees');

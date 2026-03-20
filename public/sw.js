@@ -35,7 +35,12 @@ const CACHEABLE_API = [
   '/api/sales',
   '/api/business/branding',
   '/api/analytics/dashboard',
+  '/api/analytics/health',
   '/api/inventory/insights',
+  '/api/reports',
+  '/api/payroll',
+  '/api/returns',
+  '/api/products/expiring',
 ];
 
 // Install — cache the app shell

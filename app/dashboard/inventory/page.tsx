@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
+import { fetchWithOfflineFallback } from '@/lib/offlineDataCache';
 import {
   TrendingUp, Package, AlertTriangle, RefreshCw,
   Zap, BrainCircuit, BarChart3, ShoppingCart,
@@ -178,8 +179,8 @@ export default function InventoryPage() {
   const fetchInsights = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/inventory/insights');
-      if (res.ok) setInsights(await res.json());
+      const { data } = await fetchWithOfflineFallback('/api/inventory/insights');
+      setInsights(data);
     } catch { toast.error('Failed to load inventory insights'); }
     finally { setIsLoading(false); }
   };

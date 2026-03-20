@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import toast from 'react-hot-toast';
+import { fetchWithOfflineFallback } from '@/lib/offlineDataCache';
 import {
   Wallet, Check, CreditCard, Search, Plus, X, ChevronDown, ChevronUp,
   Users, Clock, BadgeCheck, Banknote, TrendingUp, Calendar, User,
@@ -170,8 +171,7 @@ export default function PayrollPage() {
       let url = '/api/payroll?';
       if (filterStatus !== 'all') url += `status=${filterStatus}&`;
       url += `month=${filterMonth}&year=${filterYear}`;
-      const res = await fetch(url);
-      const data = await res.json();
+      const { data } = await fetchWithOfflineFallback(url);
       setPayrolls(data.payrolls || []);
     } catch {
       toast.error('Failed to load payrolls');
@@ -182,8 +182,7 @@ export default function PayrollPage() {
 
   const fetchEmployees = async () => {
     try {
-      const res = await fetch('/api/employees');
-      const data = await res.json();
+      const { data } = await fetchWithOfflineFallback('/api/employees');
       setEmployees(data.employees || []);
     } catch {
       console.error('Failed to load employees');

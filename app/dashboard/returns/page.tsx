@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
+import { fetchWithOfflineFallback } from '@/lib/offlineDataCache';
 import {
   RotateCcw, CircleDollarSign, CreditCard, Ticket,
   Check, X, Trash2, Plus, Clock, User, Package,
@@ -175,8 +176,7 @@ export default function ReturnsPage() {
   const fetchReturns = async () => {
     setIsFetching(true);
     try {
-      const res = await fetch('/api/returns');
-      const data = await res.json();
+      const { data } = await fetchWithOfflineFallback('/api/returns');
       setReturns(data.returns || []);
     } catch { toast.error('Failed to load returns'); }
     finally { setIsFetching(false); }
@@ -184,8 +184,7 @@ export default function ReturnsPage() {
 
   const fetchProducts = async () => {
     try {
-      const res = await fetch('/api/products');
-      const data = await res.json();
+      const { data } = await fetchWithOfflineFallback('/api/products');
       setProducts(data.products || []);
     } catch { /* silent */ }
   };

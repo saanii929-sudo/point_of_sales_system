@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import toast from 'react-hot-toast';
+import { fetchWithOfflineFallback } from '@/lib/offlineDataCache';
 import {
   Factory, Phone, Mail, Globe, MapPin, Edit, Trash2,
   Plus, Search, X, User, FileText, Building2,
@@ -121,8 +122,7 @@ export default function SuppliersPage() {
   const fetchSuppliers = async () => {
     setIsFetching(true);
     try {
-      const res = await fetch('/api/suppliers');
-      const data = await res.json();
+      const { data } = await fetchWithOfflineFallback('/api/suppliers');
       setSuppliers(data.suppliers || []);
     } catch { toast.error('Failed to load suppliers'); }
     finally { setIsFetching(false); }

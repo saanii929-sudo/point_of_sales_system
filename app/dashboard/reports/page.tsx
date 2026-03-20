@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/Card';
 import { useAuthStore } from '@/store/useAuthStore';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
+import { fetchWithOfflineFallback } from '@/lib/offlineDataCache';
 import {
   BarChart3, CircleDollarSign, Package, Users, Download,
   TrendingUp, Receipt, Banknote, CreditCard, Smartphone,
@@ -134,9 +135,8 @@ export default function ReportsPage() {
   const fetchReportData = async () => {
     try {
       setIsLoading(true);
-      const res = await fetch(`/api/reports?range=${dateRange}`);
-      if (res.ok) setReportData(await res.json());
-      else toast.error('Failed to load reports');
+      const { data } = await fetchWithOfflineFallback(`/api/reports?range=${dateRange}`);
+      setReportData(data);
     } catch { toast.error('Failed to load reports'); }
     finally { setIsLoading(false); }
   };

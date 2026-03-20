@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
 import toast from 'react-hot-toast';
+import { fetchWithOfflineFallback } from '@/lib/offlineDataCache';
 import {
   Settings, Palette, Image as ImageIcon, Upload, X, Lightbulb,
   Building2, Lock, CheckCircle2, Loader2, Eye,
@@ -64,22 +65,19 @@ export default function SettingsPage() {
 
   const fetchBranding = async () => {
     try {
-      const res = await fetch('/api/business/branding');
-      if (res.ok) {
-        const data = await res.json();
-        const b: Branding = {
-          businessName:   data.branding.businessName   || '',
-          primaryColor:   data.branding.primaryColor   || '#10b981',
-          secondaryColor: data.branding.secondaryColor || '#059669',
-          accentColor:    data.branding.accentColor    || '#34d399',
-          logoUrl:        data.branding.logoUrl        || '',
-          faviconUrl:     data.branding.faviconUrl     || '',
-          companyTagline: data.branding.companyTagline || '',
-        };
-        setBranding(b);
-        setLogoPreview(b.logoUrl);
-        setFaviconPreview(b.faviconUrl);
-      }
+      const { data } = await fetchWithOfflineFallback('/api/business/branding');
+      const b: Branding = {
+        businessName:   data.branding.businessName   || '',
+        primaryColor:   data.branding.primaryColor   || '#10b981',
+        secondaryColor: data.branding.secondaryColor || '#059669',
+        accentColor:    data.branding.accentColor    || '#34d399',
+        logoUrl:        data.branding.logoUrl        || '',
+        faviconUrl:     data.branding.faviconUrl     || '',
+        companyTagline: data.branding.companyTagline || '',
+      };
+      setBranding(b);
+      setLogoPreview(b.logoUrl);
+      setFaviconPreview(b.faviconUrl);
     } catch {
       toast.error('Failed to load branding');
     } finally {

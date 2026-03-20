@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Card, CardBody } from '@/components/ui/Card';
+import { fetchWithOfflineFallback } from '@/lib/offlineDataCache';
 
 interface HealthMetrics {
   salesTrend: number; // -100 to 100
@@ -25,12 +26,9 @@ export function BusinessHealthIndicator() {
 
   const fetchHealthMetrics = async () => {
     try {
-      const res = await fetch('/api/analytics/health');
-      if (res.ok) {
-        const data = await res.json();
-        setHealth(data.metrics);
-        setOverallScore(data.overallScore);
-      }
+      const { data } = await fetchWithOfflineFallback('/api/analytics/health');
+      setHealth(data.metrics);
+      setOverallScore(data.overallScore);
     } catch (error) {
       console.error('Failed to fetch health metrics');
     }

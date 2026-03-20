@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
+import { fetchWithOfflineFallback } from '@/lib/offlineDataCache';
 import { 
   Tag, 
   Plus, 
@@ -70,11 +71,8 @@ export default function DiscountsPage() {
 
   const fetchDiscounts = async () => {
     try {
-      const res = await fetch(`/api/discounts?status=${filterStatus}`);
-      if (res.ok) {
-        const data = await res.json();
-        setDiscounts(data.discounts);
-      }
+      const { data } = await fetchWithOfflineFallback(`/api/discounts?status=${filterStatus}`);
+      setDiscounts(data.discounts);
     } catch (error) {
       toast.error('Failed to load discounts');
     } finally {
