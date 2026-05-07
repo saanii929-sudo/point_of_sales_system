@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useThemeStore } from '@/store/useThemeStore';
 import { CommandPalette } from '@/components/dashboard/CommandPalette';
+import { NotificationCenter } from '@/components/dashboard/NotificationCenter';
+import { BranchSelector } from '@/components/dashboard/BranchSelector';
 import { OfflineBanner, OnlineStatusIndicator } from '@/components/ui/OfflineBanner';
 import { prefetchOfflineData } from '@/lib/offlineDataCache';
 import toast from 'react-hot-toast';
@@ -13,8 +15,10 @@ import {
   LayoutDashboard, ShoppingCart, Package, BarChart3, Factory,
   DollarSign, RotateCcw, Users, UserCircle, Wallet, TrendingUp,
   Settings, Moon, Sun, LogOut, Menu, X, Calendar, Tag,
-  ChevronLeft, ChevronRight, Bell,
+  ChevronLeft, ChevronRight, Clock, AlertTriangle, GitBranch, Building2, Plus,
+  Star, Activity, Bell,
 } from 'lucide-react';
+import type { SubscriptionState } from '@/lib/subscription';
 
 // ── Types ──────────────────────────────────────────────────
 interface Branding {
@@ -67,24 +71,30 @@ function getNavSections(role: string): NavSection[] {
       { name: 'Suppliers',         href: '/dashboard/suppliers', icon: Factory },
     ]},
     { label: 'Sales & Finance', items: [
-      { name: 'Sales',     href: '/dashboard/sales',     icon: DollarSign },
-      { name: 'Returns',   href: '/dashboard/returns',   icon: RotateCcw },
-      { name: 'Discounts', href: '/dashboard/discounts', icon: Tag },
-      { name: 'Payroll',   href: '/dashboard/payroll',   icon: Wallet },
+      { name: 'Sales',           href: '/dashboard/sales',     icon: DollarSign },
+      { name: 'Returns',         href: '/dashboard/returns',   icon: RotateCcw  },
+      { name: 'Discounts',       href: '/dashboard/discounts', icon: Tag        },
+      { name: 'Payroll',         href: '/dashboard/payroll',   icon: Wallet     },
+      { name: 'Loyalty Program', href: '/dashboard/loyalty',   icon: Star       },
     ]},
     { label: 'Team & Customers', items: [
-      { name: 'Customers', href: '/dashboard/customers', icon: Users },
+      { name: 'Customers', href: '/dashboard/customers', icon: Users      },
       { name: 'Employees', href: '/dashboard/employees', icon: UserCircle },
     ]},
     { label: 'Analytics', items: [
-      { name: 'Reports', href: '/dashboard/reports', icon: TrendingUp },
+      { name: 'Reports',       href: '/dashboard/reports',       icon: TrendingUp },
+      { name: 'Notifications', href: '/dashboard/notifications', icon: Bell       },
     ]},
   ];
 
-  if (role === 'business_owner') {
+  if (role === 'business_owner' || role === 'manager') {
     sections.push({
       label: 'Settings',
-      items: [{ name: 'Settings', href: '/dashboard/settings', icon: Settings }],
+      items: [
+        { name: 'Branches',     href: '/dashboard/branches', icon: GitBranch },
+        { name: 'Activity Log', href: '/dashboard/activity', icon: Activity  },
+        ...(role === 'business_owner' ? [{ name: 'Settings', href: '/dashboard/settings', icon: Settings }] : []),
+      ],
     });
   }
 
@@ -108,6 +118,10 @@ function getPageTitle(pathname: string): string {
     '/dashboard/employees': 'Employees',
     '/dashboard/reports':   'Reports',
     '/dashboard/settings':  'Settings',
+    '/dashboard/branches':     'Branch Management',
+    '/dashboard/loyalty':      'Loyalty Program',
+    '/dashboard/activity':     'Activity Log',
+    '/dashboard/notifications':'Notifications',
   };
   return map[pathname] ?? 'Dashboard';
 }
@@ -125,13 +139,24 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { user, setUser, logout } = useAuthStore();
   const { theme, toggleTheme }    = useThemeStore();
 
+  const [subscription,   setSubscription]   = useState<SubscriptionState | null>(null);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isCollapsed,  setIsCollapsed]  = useState(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('sidebar-collapsed') === 'true';
   });
-  const [branding,  setBranding]  = useState<Branding | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [branding,       setBranding]       = useState<Branding | null>(null);
+  const [isLoading,      setIsLoading]      = useState(true);
+  const [,    setNotifUnread]    = useState(0);
+  // Onboarding gate: owner must create a branch before using the app
+  const [branchGate, setBranchGate] = useState(false);
+
+  // Dismiss gate when a branch is created
+  useEffect(() => {
+    const handler = () => setBranchGate(false);
+    window.addEventListener('branch-created', handler);
+    return () => window.removeEventListener('branch-created', handler);
+  }, []);
 
   // Apply branding colors to CSS vars
   const applyBrandingColors = useCallback((b: Branding) => {
@@ -157,6 +182,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       const res  = await fetch('/api/auth/session');
       const data = res.ok ? await res.json() : {};
       setUser(data.user ?? null);
+      if (data.subscription) setSubscription(data.subscription);
     } catch {
       setUser(null);
     } finally {
@@ -180,19 +206,29 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, [applyBrandingColors]);
 
+
   useEffect(() => { validateSession(); }, [validateSession]);
 
   useEffect(() => {
     if (!isLoading) {
-      if (!user)                         router.push('/login');
+      if (!user)                            router.push('/login');
       else if (user.role === 'super_admin') router.push('/superadmin');
-      else {
+      else if (subscription && !subscription.isActive) {
+        router.push('/subscription-expired');
+      } else {
         fetchBranding();
+        // Check onboarding gate for business owners
+        if (user.role === 'business_owner') {
+          fetch('/api/branches')
+            .then(r => r.json())
+            .then(d => { if ((d.branches?.length ?? 0) === 0) setBranchGate(true); })
+            .catch(() => {});
+        }
         // Refresh offline data cache in background
         try { prefetchOfflineData().catch(() => {}); } catch {}
       }
     }
-  }, [user, router, isLoading, fetchBranding]);
+  }, [user, router, isLoading, subscription, fetchBranding]);
 
   // Listen for branding updates from settings
   useEffect(() => {
@@ -239,7 +275,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return (
       <div className="min-h-screen bg-[var(--bg-page)] flex items-center justify-center">
         <div className="space-y-4 text-center">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-700 flex items-center justify-center mx-auto shadow-lg animate-pulse">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-700 flex items-center justify-center mx-auto animate-pulse">
             <ShoppingCart className="w-7 h-7 text-white" />
           </div>
           <div className="space-y-2">
@@ -252,6 +288,36 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   if (!user) return null;
+
+  // ── Branch onboarding gate ─────────────────────────────
+  if (branchGate && pathname !== '/dashboard/branches') {
+    return (
+      <div className="min-h-screen bg-[var(--bg-page)] flex items-center justify-center p-6">
+        <div className="bg-[var(--bg-surface)] rounded-2xl border border-[var(--border-subtle)] max-w-md w-full p-8 text-center space-y-5">
+          <div className="w-16 h-16 rounded-2xl bg-emerald-50 flex items-center justify-center mx-auto">
+            <Building2 className="w-8 h-8 text-emerald-600" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-[var(--text-primary)]">Set Up Your First Branch</h2>
+            <p className="text-sm text-[var(--text-secondary)] mt-2 leading-relaxed">
+              Before you can start selling, managing inventory, or adding employees, you need to create at least one branch for your business.
+            </p>
+          </div>
+          <Link
+            href="/dashboard/branches"
+            onClick={() => setBranchGate(false)}
+            className="btn-primary inline-flex items-center gap-2 px-6 py-3 text-sm font-semibold rounded-xl"
+          >
+            <Plus className="w-4 h-4" />
+            Create Your First Branch
+          </Link>
+          <p className="text-xs text-[var(--text-tertiary)]">
+            You can add more branches later from Branch Management.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const navSections = getNavSections(user.role);
   const pageTitle   = getPageTitle(pathname);
@@ -269,6 +335,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {/* ── Offline banner ── */}
       <OfflineBanner />
 
+      {/* NotificationCenter handles its own dropdown panel */}
+
       {/* ── Mobile overlay ── */}
       {isMobileOpen && (
         <div
@@ -282,7 +350,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         className={`
           fixed top-0 left-0 z-40 h-screen flex flex-col
           bg-[var(--bg-surface)] border-r border-[var(--border-subtle)]
-          shadow-[var(--shadow-elevated)]
           sidebar-transition sidebar-scroll
           ${isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}
@@ -297,7 +364,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <img src={branding.logoUrl} alt={branding.businessName} className="w-9 h-9 rounded-xl object-cover flex-shrink-0" />
               ) : (
                 <div
-                  className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md"
+                  className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
                   style={{ background: `linear-gradient(135deg, ${primaryColor}, ${secondaryColor})` }}
                 >
                   <ShoppingCart className="w-4 h-4 text-white" />
@@ -324,6 +391,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </button>
           </div>
         </div>
+
+        {/* Branch selector */}
+        {user.role !== 'inventory_staff' && (
+          <div className="flex-shrink-0 pt-2 relative">
+            <BranchSelector collapsed={isCollapsed} />
+          </div>
+        )}
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5 sidebar-scroll">
@@ -389,7 +463,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               </button>
               <button
                 onClick={handleLogout}
-                className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 text-[var(--text-tertiary)] hover:text-red-600 transition-colors"
+                className="p-1.5 rounded-lg hover:bg-red-50 text-[var(--text-tertiary)] hover:text-red-600 transition-colors"
                 title="Logout"
               >
                 <LogOut className="w-3.5 h-3.5" />
@@ -401,7 +475,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {/* Collapse toggle (desktop only) */}
         <button
           onClick={toggleCollapsed}
-          className="hidden lg:flex absolute -right-3 top-20 w-6 h-6 bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-full items-center justify-center shadow-sm hover:bg-[var(--bg-surface-2)] transition-colors z-50"
+          className="hidden lg:flex absolute -right-3 top-20 w-6 h-6 bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-full items-center justify-center hover:bg-[var(--bg-surface-2)] transition-colors z-50"
         >
           {isCollapsed
             ? <ChevronRight className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />
@@ -453,11 +527,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <span>⌘K</span>
             </div>
 
-            {/* Notifications (placeholder) */}
-            <button className="relative p-2 rounded-xl hover:bg-[var(--bg-surface-2)] text-[var(--text-secondary)] transition-colors">
-              <Bell className="w-4 h-4" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
-            </button>
+            {/* Notifications */}
+            <NotificationCenter onUnreadChange={setNotifUnread} />
 
             {/* User avatar */}
             <div
@@ -470,8 +541,31 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </header>
 
-        {/* Page content */}
-        <main className="flex-1 p-4 lg:p-6">
+        {/* Trial / expiry banner */}
+        {subscription?.isTrial && subscription.daysLeft <= 14 && (
+          <div className={`flex items-center gap-3 px-4 lg:px-6 py-2.5 text-sm font-medium ${
+            subscription.daysLeft <= 3
+              ? 'bg-red-500 text-white'
+              : subscription.daysLeft <= 7
+              ? 'bg-amber-500 text-white'
+              : 'bg-amber-50 text-amber-800 border-b border-amber-200'
+          }`}>
+            {subscription.daysLeft <= 3 ? (
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+            ) : (
+              <Clock className="w-4 h-4 flex-shrink-0" />
+            )}
+            <span>
+              {subscription.daysLeft === 0
+                ? 'Your free trial expires today.'
+                : `Your free trial expires in ${subscription.daysLeft} day${subscription.daysLeft === 1 ? '' : 's'}.`}
+              {' '}Contact the admin to subscribe and keep full access.
+            </span>
+          </div>
+        )}
+
+        {/* Page content — fade-in on route change */}
+        <main className="flex-1 p-4 lg:p-6 animate-fade-in" key={pathname}>
           {children}
         </main>
       </div>

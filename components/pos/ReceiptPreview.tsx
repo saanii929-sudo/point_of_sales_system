@@ -349,7 +349,7 @@ export function ReceiptPreview({
           <div class="footer-message">THANK YOU FOR YOUR PURCHASE!</div>
           <div>Please come again</div>
           <div style="margin-top: 10px; font-size: 9px;">
-            Powered by SaaS POS
+            Powered by SmartVendr
           </div>
         </div>
         
@@ -493,7 +493,7 @@ export function ReceiptPreview({
               <p className="font-bold">THANK YOU FOR YOUR PURCHASE!</p>
               <p>Please come again</p>
               <p className="text-[10px] text-gray-600 dark:text-gray-400 mt-3">
-                Powered by SaaS POS
+                Powered by SmartVendr
               </p>
             </div>
           </div>

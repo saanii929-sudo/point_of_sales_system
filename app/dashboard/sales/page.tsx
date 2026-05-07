@@ -4,13 +4,14 @@ import { useEffect, useState, useMemo } from 'react';
 import { Card } from '@/components/ui/Card';
 import toast from 'react-hot-toast';
 import { fetchWithOfflineFallback } from '@/lib/offlineDataCache';
-import { format } from 'date-fns';
+import { format, isToday, isThisWeek, isThisMonth } from 'date-fns';
 import {
-  Receipt, TrendingUp, CircleDollarSign, Users,
+  Receipt, TrendingUp, CircleDollarSign,
   Search, X, ChevronDown, ChevronUp, CreditCard,
   Banknote, Smartphone, RefreshCw, ShoppingCart,
-  ArrowUpRight, Clock, Package, Filter
+  Clock, Package, GitBranch,
 } from 'lucide-react';
+import { useBranchStore } from '@/store/useBranchStore';
 
 // ── Interfaces ───────────────────────────────────────────────
 interface SaleItem {
@@ -50,19 +51,19 @@ function PaymentBadge({ method }: { method: string }) {
   const m = method.toLowerCase();
   if (m === 'cash')
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400">
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700">
         <Banknote className="w-3 h-3" /> Cash
       </span>
     );
   if (m === 'card')
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400">
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700">
         <CreditCard className="w-3 h-3" /> Card
       </span>
     );
   if (m.includes('momo') || m.includes('mobile'))
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-50 dark:bg-purple-950/30 text-purple-700 dark:text-purple-400">
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-50 text-purple-700">
         <Smartphone className="w-3 h-3" /> MoMo
       </span>
     );
@@ -75,21 +76,32 @@ function PaymentBadge({ method }: { method: string }) {
 
 // ── Page ─────────────────────────────────────────────────────
 export default function SalesPage() {
+  const { selectedBranchId, selectedBranchName, branches } = useBranchStore();
+
   const [sales, setSales] = useState<Sale[]>([]);
   const [isFetching, setIsFetching] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [receiptSale, setReceiptSale] = useState<Sale | null>(null);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [paymentFilter, setPaymentFilter] = useState('');
   const [dateFilter, setDateFilter] = useState('');
+  const [branchFilter, setBranchFilter] = useState<string>('');
+  const [periodFilter, setPeriodFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
 
-  useEffect(() => { fetchSales(); }, []);
+  // Keep branch filter in sync with store selection
+  useEffect(() => {
+    setBranchFilter(selectedBranchId ?? '');
+  }, [selectedBranchId]);
+
+  useEffect(() => { fetchSales(); }, [branchFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchSales = async () => {
     try {
       setIsFetching(true);
-      const { data } = await fetchWithOfflineFallback('/api/sales');
+      const branchParam = branchFilter ? `?branchId=${branchFilter}` : '';
+      const { data } = await fetchWithOfflineFallback(`/api/sales${branchParam}`);
       setSales(data.sales || []);
     } catch {
       toast.error('Failed to load sales');
@@ -98,15 +110,22 @@ export default function SalesPage() {
     }
   };
 
-  // ── Derived KPIs ─────────────────────────────────────────
+  // ── Derived KPIs (scoped to period) ─────────────────────
   const stats = useMemo(() => {
-    if (!sales.length) return { total: 0, revenue: 0, avg: 0, topMethod: '—' };
-    const revenue = sales.reduce((s, x) => s + x.total, 0);
+    const scope = sales.filter(s => {
+      const d = new Date(s.createdAt);
+      if (periodFilter === 'today') return isToday(d);
+      if (periodFilter === 'week')  return isThisWeek(d, { weekStartsOn: 1 });
+      if (periodFilter === 'month') return isThisMonth(d);
+      return true;
+    });
+    if (!scope.length) return { total: 0, revenue: 0, avg: 0, topMethod: '—' };
+    const revenue = scope.reduce((s, x) => s + x.total, 0);
     const methodCount: Record<string, number> = {};
-    for (const s of sales) methodCount[s.paymentMethod] = (methodCount[s.paymentMethod] || 0) + 1;
+    for (const s of scope) methodCount[s.paymentMethod] = (methodCount[s.paymentMethod] || 0) + 1;
     const topMethod = Object.entries(methodCount).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—';
-    return { total: sales.length, revenue, avg: revenue / sales.length, topMethod };
-  }, [sales]);
+    return { total: scope.length, revenue, avg: revenue / scope.length, topMethod };
+  }, [sales, periodFilter]);
 
   // ── Unique payment methods for filter ───────────────────
   const paymentMethods = useMemo(() => [...new Set(sales.map((s) => s.paymentMethod))], [sales]);
@@ -121,14 +140,26 @@ export default function SalesPage() {
         const saleDate = format(new Date(s.createdAt), 'yyyy-MM-dd');
         if (saleDate !== dateFilter) return false;
       }
+      if (periodFilter !== 'all') {
+        const d = new Date(s.createdAt);
+        if (periodFilter === 'today' && !isToday(d)) return false;
+        if (periodFilter === 'week'  && !isThisWeek(d,  { weekStartsOn: 1 })) return false;
+        if (periodFilter === 'month' && !isThisMonth(d)) return false;
+      }
       return true;
     });
-  }, [sales, searchQuery, paymentFilter, dateFilter]);
+  }, [sales, searchQuery, paymentFilter, dateFilter, periodFilter]);
 
-  const hasFilters = searchQuery || paymentFilter || dateFilter;
-  const clearFilters = () => { setSearchQuery(''); setPaymentFilter(''); setDateFilter(''); };
+  const hasFilters = searchQuery || paymentFilter || dateFilter || (branchFilter && branchFilter !== selectedBranchId);
+  const clearFilters = () => { setSearchQuery(''); setPaymentFilter(''); setDateFilter(''); setPeriodFilter('all'); };
 
   const toggleExpand = (id: string) => setExpandedId((prev) => (prev === id ? null : id));
+
+  // Close receipt modal on Escape
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setReceiptSale(null); };
+    if (receiptSale) { document.addEventListener('keydown', onKey); return () => document.removeEventListener('keydown', onKey); }
+  }, [receiptSale]);
 
   // ── Skeleton ──────────────────────────────────────────────
   if (isFetching) {
@@ -195,8 +226,8 @@ export default function SalesPage() {
               <p className="text-xs font-medium text-[var(--text-secondary)] uppercase tracking-wider mb-2">Total Sales</p>
               <p className="text-3xl font-bold text-[var(--text-primary)] leading-none">{stats.total}</p>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/30 flex items-center justify-center flex-shrink-0">
-              <Receipt className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center flex-shrink-0">
+              <Receipt className="w-5 h-5 text-blue-600" />
             </div>
           </div>
         </Card>
@@ -212,8 +243,8 @@ export default function SalesPage() {
                   : stats.revenue.toFixed(0)}
               </p>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 flex items-center justify-center flex-shrink-0">
-              <TrendingUp className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
+              <TrendingUp className="w-5 h-5 text-emerald-600" />
             </div>
           </div>
         </Card>
@@ -227,8 +258,8 @@ export default function SalesPage() {
                 {stats.avg.toFixed(0)}
               </p>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-purple-50 dark:bg-purple-950/30 flex items-center justify-center flex-shrink-0">
-              <CircleDollarSign className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+            <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center flex-shrink-0">
+              <CircleDollarSign className="w-5 h-5 text-purple-600" />
             </div>
           </div>
         </Card>
@@ -239,11 +270,34 @@ export default function SalesPage() {
               <p className="text-xs font-medium text-[var(--text-secondary)] uppercase tracking-wider mb-2">Top Payment</p>
               <p className="text-xl font-bold text-[var(--text-primary)] leading-none capitalize mt-1">{stats.topMethod}</p>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-950/30 flex items-center justify-center flex-shrink-0">
-              <CreditCard className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+            <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center flex-shrink-0">
+              <CreditCard className="w-5 h-5 text-amber-600" />
             </div>
           </div>
         </Card>
+      </div>
+
+      {/* ── Period tabs ── */}
+      <div className="flex gap-1.5 p-1.5 bg-[var(--bg-surface-2)] rounded-2xl border border-[var(--border-subtle)] w-fit">
+        {([
+          { key: 'all',   label: 'All Time' },
+          { key: 'today', label: 'Today' },
+          { key: 'week',  label: 'This Week' },
+          { key: 'month', label: 'This Month' },
+        ] as { key: typeof periodFilter; label: string }[]).map(({ key, label }) => (
+          <button
+            key={key}
+            onClick={() => setPeriodFilter(key)}
+            className={[
+              'px-4 py-2 rounded-xl text-sm font-semibold transition-all',
+              periodFilter === key
+                ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] border border-[var(--border-subtle)]'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+            ].join(' ')}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       {/* ── Filter bar ── */}
@@ -282,6 +336,24 @@ export default function SalesPage() {
             <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-tertiary)] pointer-events-none" />
           </div>
 
+          {/* Branch filter */}
+          {branches.length > 1 && (
+            <div className="relative">
+              <GitBranch className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-tertiary)] pointer-events-none" />
+              <select
+                value={branchFilter}
+                onChange={(e) => setBranchFilter(e.target.value)}
+                className="pl-9 pr-8 py-2.5 text-sm rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface-2)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]/20 focus:border-[var(--primary-color)] transition-all appearance-none cursor-pointer min-w-[150px]"
+              >
+                <option value="">All Branches</option>
+                {branches.filter(b => b.isActive).map(b => (
+                  <option key={b._id} value={b._id}>{b.name}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-tertiary)] pointer-events-none" />
+            </div>
+          )}
+
           {/* Date filter */}
           <div className="relative">
             <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-tertiary)] pointer-events-none" />
@@ -296,7 +368,7 @@ export default function SalesPage() {
           {hasFilters && (
             <button
               onClick={clearFilters}
-              className="flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium rounded-xl border border-[var(--border-default)] text-[var(--text-secondary)] hover:text-red-600 hover:border-red-300 dark:hover:border-red-800 transition-all"
+              className="flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium rounded-xl border border-[var(--border-default)] text-[var(--text-secondary)] hover:text-red-600 hover:border-red-300 transition-all"
             >
               <X className="w-3.5 h-3.5" /> Clear
             </button>
@@ -462,6 +534,15 @@ export default function SalesPage() {
                             </p>
                           </div>
                         </div>
+                        <div className="flex justify-end mt-3">
+                          <button
+                            onClick={e => { e.stopPropagation(); setReceiptSale(sale); }}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-strong)] transition-all"
+                          >
+                            <Receipt className="w-3.5 h-3.5" />
+                            View Receipt
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -486,6 +567,94 @@ export default function SalesPage() {
           </div>
         )}
       </Card>
+
+      {/* ── Receipt Modal ── */}
+      {receiptSale && (
+        <div
+          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+          onClick={() => setReceiptSale(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl overflow-hidden"
+            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Receipt header */}
+            <div className="px-6 pt-6 pb-4 text-center border-b border-dashed border-[var(--border-default)]">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center mx-auto mb-3">
+                <Receipt className="w-6 h-6 text-white" />
+              </div>
+              <h3 className="text-lg font-bold text-[var(--text-primary)]">Sale Receipt</h3>
+              <p className="text-xs font-mono text-[var(--text-tertiary)] mt-1">#{receiptSale.saleNumber}</p>
+              <p className="text-xs text-[var(--text-secondary)] mt-1">
+                {format(new Date(receiptSale.createdAt), "MMM d, yyyy 'at' h:mm a")}
+              </p>
+            </div>
+
+            {/* Items */}
+            <div className="px-6 py-4 space-y-2 max-h-64 overflow-y-auto">
+              {receiptSale.items.map((item, i) => (
+                <div key={i} className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-[var(--text-primary)] truncate">{item.productName}</p>
+                    <p className="text-xs text-[var(--text-tertiary)]">{item.quantity} × GH₵{item.price.toFixed(2)}</p>
+                  </div>
+                  <p className="text-sm font-semibold text-[var(--text-primary)] tabular-nums flex-shrink-0">
+                    GH₵{(item.price * item.quantity).toFixed(2)}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            {/* Totals */}
+            <div className="px-6 pb-4 border-t border-dashed border-[var(--border-default)] pt-4 space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-[var(--text-secondary)]">Subtotal</span>
+                <span className="font-medium text-[var(--text-primary)] tabular-nums">
+                  GH₵{receiptSale.items.reduce((s, i) => s + i.price * i.quantity, 0).toFixed(2)}
+                </span>
+              </div>
+              <div className="flex justify-between text-base font-bold border-t border-[var(--border-subtle)] pt-2 mt-2">
+                <span className="text-[var(--text-primary)]">Total</span>
+                <span className="text-[var(--text-primary)] tabular-nums">GH₵{receiptSale.total.toFixed(2)}</span>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 pb-5 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div
+                  className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-[10px] font-bold"
+                  style={{ backgroundColor: cashierColor(receiptSale.cashier.name) }}
+                >
+                  {getInitials(receiptSale.cashier.name)}
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-[var(--text-primary)]">{receiptSale.cashier.name}</p>
+                  <p className="text-[10px] text-[var(--text-tertiary)]">Cashier</p>
+                </div>
+              </div>
+              <PaymentBadge method={receiptSale.paymentMethod} />
+            </div>
+
+            {/* Actions */}
+            <div className="px-6 pb-5 flex gap-2">
+              <button
+                onClick={() => window.print()}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold border border-[var(--border-default)] bg-[var(--bg-surface-2)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-strong)] transition-all flex items-center justify-center gap-2"
+              >
+                <Receipt className="w-3.5 h-3.5" /> Print
+              </button>
+              <button
+                onClick={() => setReceiptSale(null)}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold border border-[var(--border-default)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-strong)] transition-all"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

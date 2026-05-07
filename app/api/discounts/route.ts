@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { connectDB } from '@/lib/db';
 import Discount from '@/models/Discount';
+import '@/models/Category'; // register schema for populate
 
 export async function GET(req: NextRequest) {
   try {

@@ -21,7 +21,8 @@ export async function GET(req: NextRequest) {
     await connectDB();
 
     const { searchParams } = new URL(req.url);
-    const period = searchParams.get('period') || 'today';
+    const period   = searchParams.get('period') || 'today';
+    const branchId = searchParams.get('branchId') || null;
 
     let startDate = new Date();
     startDate.setHours(0, 0, 0, 0);
@@ -39,12 +40,41 @@ export async function GET(req: NextRequest) {
       ? { status: 'completed', createdAt: { $gte: startDate } }
       : { tenantId: session.tenantId, status: 'completed', createdAt: { $gte: startDate } };
 
+    // Filter by branch when provided
+    if (branchId && session.role !== 'super_admin') {
+      query.branchId = branchId;
+    }
+
     // Get sales data
     const sales = await Sale.find(query);
     
     const totalSales = sales.reduce((sum, sale) => sum + sale.total, 0);
     const totalProfit = sales.reduce((sum, sale) => sum + sale.profit, 0);
     const salesCount = sales.length;
+
+    // ── Previous period for change % ──────────────────────
+    const periodMs = new Date().getTime() - startDate.getTime();
+    const prevEnd   = new Date(startDate);
+    const prevStart = new Date(startDate.getTime() - periodMs);
+    const prevQuery: any = session.role === 'super_admin'
+      ? { status: 'completed', createdAt: { $gte: prevStart, $lt: prevEnd } }
+      : { tenantId: session.tenantId, status: 'completed', createdAt: { $gte: prevStart, $lt: prevEnd } };
+    if (branchId && session.role !== 'super_admin') {
+      prevQuery.branchId = branchId;
+    }
+    const prevSales = await Sale.find(prevQuery);
+    const prevTotalSales  = prevSales.reduce((sum, s) => sum + s.total, 0);
+    const prevTotalProfit = prevSales.reduce((sum, s) => sum + s.profit, 0);
+    const prevSalesCount  = prevSales.length;
+
+    const pctChange = (curr: number, prev: number) => {
+      if (prev === 0) return curr > 0 ? 100 : 0;
+      return Math.round(((curr - prev) / prev) * 1000) / 10; // 1 decimal
+    };
+
+    const salesChange       = pctChange(totalSales,  prevTotalSales);
+    const profitChange      = pctChange(totalProfit, prevTotalProfit);
+    const salesCountChange  = pctChange(salesCount,  prevSalesCount);
 
     // Get top products
     const productSales: Record<string, { name: string; quantity: number; revenue: number }> = {};
@@ -160,11 +190,15 @@ export async function GET(req: NextRequest) {
       .slice(0, 8);
 
     return NextResponse.json({
+      branchId: branchId ?? null,
       summary: {
         totalSales,
         totalProfit,
         salesCount,
-        totalCustomers
+        totalCustomers,
+        salesChange,
+        profitChange,
+        salesCountChange,
       },
       topProducts,
       lowStockProducts,

@@ -776,11 +776,48 @@
 
 /* ── Print styles ── */
 @media print {
-  body * { visibility: hidden; }
+  /* ── Receipt print (80mm thermal) ── */
+  body:has(.print-area) * { visibility: hidden; }
   .print-area, .print-area * { visibility: visible; }
   .print-area {
     position: absolute;
     left: 0; top: 0;
     width: 80mm;
   }
+
+  /* ── Dashboard / full-page print ── */
+  body:not(:has(.print-area)) {
+    background: white !important;
+  }
+
+  /* Hide chrome: sidebar, header, action buttons, offline banner */
+  body:not(:has(.print-area)) aside,
+  body:not(:has(.print-area)) header,
+  body:not(:has(.print-area)) nav,
+  body:not(:has(.print-area)) .no-print,
+  body:not(:has(.print-area)) [data-no-print] {
+    display: none !important;
+  }
+
+  /* Remove sidebar margin so content fills the page */
+  body:not(:has(.print-area)) .lg\:ml-\[260px\] {
+    margin-left: 0 !important;
+  }
+
+  /* Reset padding for the main content area */
+  body:not(:has(.print-area)) main {
+    padding: 16px !important;
+  }
+
+  /* Flatten card shadows and borders for cleaner print output */
+  body:not(:has(.print-area)) * {
+    box-shadow: none !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Page breaks */
+  .page-break-before { page-break-before: always; }
+  .page-break-after  { page-break-after:  always; }
+  .no-page-break     { page-break-inside: avoid; }
 }

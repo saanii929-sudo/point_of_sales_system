@@ -117,7 +117,7 @@ function KpiCard({ label, value, prefix = '', sub, icon: Icon, color, urgent }: 
       style={{
         background: 'var(--bg-surface)',
         border: `1px solid ${urgent ? color + '44' : 'var(--border-subtle)'}`,
-        boxShadow: 'var(--shadow-card)',
+        
       }}
     >
       <div className="flex items-center justify-between">
@@ -297,7 +297,7 @@ export default function ReturnsPage() {
           <button
             onClick={() => setIsModalOpen(true)}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
-            style={{ background: 'var(--primary-color)', boxShadow: '0 2px 8px var(--primary-color)44' }}
+            style={{ background: 'var(--primary-color)' }}
           >
             <Plus className="w-4 h-4" /> Process Return
           </button>
@@ -324,7 +324,7 @@ export default function ReturnsPage() {
       {/* ── Tab + List ── */}
       <div
         className="rounded-2xl overflow-hidden"
-        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-card)' }}
+        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}
       >
         {/* Tab bar */}
         <div
@@ -577,7 +577,7 @@ export default function ReturnsPage() {
         >
           <div
             className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-2xl overflow-hidden"
-            style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-floating)' }}
+            style={{ background: 'var(--bg-surface)' }}
           >
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 flex-shrink-0" style={{ borderBottom: '1px solid var(--border-subtle)' }}>

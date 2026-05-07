@@ -3,10 +3,13 @@ import { connectDB } from '@/lib/db';
 import { getSession } from '@/lib/auth';
 import Sale from '@/models/Sale';
 import Product from '@/models/Product';
+import BranchInventory from '@/models/BranchInventory';
+import Branch from '@/models/Branch';
 import Customer from '@/models/Customer';
 import Discount from '@/models/Discount';
 import { generateSaleNumber, calculateProfit } from '@/lib/utils';
 import { emitToTenant } from '@/lib/socket';
+import { logActivity } from '@/lib/logActivity';
 
 export async function GET(req: NextRequest) {
   try {
@@ -18,9 +21,10 @@ export async function GET(req: NextRequest) {
     await connectDB();
 
     const { searchParams } = new URL(req.url);
-    const limit = parseInt(searchParams.get('limit') || '50');
+    const limit    = parseInt(searchParams.get('limit') || '50');
     const startDate = searchParams.get('startDate');
-    const endDate = searchParams.get('endDate');
+    const endDate   = searchParams.get('endDate');
+    const branchId  = searchParams.get('branchId') || null;
 
     // Super admin can see all sales, others only their tenant's sales
     let query: any = session.role === 'super_admin'
@@ -32,6 +36,10 @@ export async function GET(req: NextRequest) {
         $gte: new Date(startDate),
         $lte: new Date(endDate)
       };
+    }
+
+    if (branchId && session.role !== 'super_admin') {
+      query.branchId = branchId;
     }
 
     const sales = await Sale.find(query)
@@ -61,13 +69,22 @@ export async function POST(req: NextRequest) {
     await connectDB();
 
     const body = await req.json();
-    const { items, discount, discountCode, discountId, tax, paymentMethod, paymentDetails, customerInfo } = body;
+    const { items, discount, discountCode, discountId, tax, paymentMethod, paymentDetails, customerInfo, branchId } = body;
 
     if (!items || items.length === 0) {
       return NextResponse.json(
         { error: 'No items in cart' },
         { status: 400 }
       );
+    }
+
+    // Validate branch if provided
+    let branch = null;
+    if (branchId) {
+      branch = await Branch.findOne({ _id: branchId, tenantId: session.tenantId, isActive: true });
+      if (!branch) {
+        return NextResponse.json({ error: 'Branch not found or inactive' }, { status: 400 });
+      }
     }
 
     // Validate stock and prepare sale items
@@ -85,11 +102,44 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      if (product.stock < item.quantity) {
-        return NextResponse.json(
-          { error: `Insufficient stock for ${product.name}` },
-          { status: 400 }
-        );
+      if (branchId) {
+        // ── Branch mode: deduct from BranchInventory ──────
+        const bi = await BranchInventory.findOne({
+          tenantId: session.tenantId,
+          branch: branchId,
+          product: product._id,
+        });
+        const availableStock = bi?.stock ?? 0;
+        const allowNeg = branch?.settings?.allowNegativeStock ?? false;
+
+        if (!allowNeg && availableStock < item.quantity) {
+          return NextResponse.json(
+            { error: `Insufficient stock for ${product.name} at this branch (${availableStock} available)` },
+            { status: 400 }
+          );
+        }
+
+        if (bi) {
+          bi.stock = allowNeg ? bi.stock - item.quantity : Math.max(0, bi.stock - item.quantity);
+          bi.lastSold = new Date();
+          await bi.save();
+        } else if (!allowNeg) {
+          return NextResponse.json(
+            { error: `${product.name} is not stocked at this branch` },
+            { status: 400 }
+          );
+        }
+      } else {
+        // ── No-branch mode: deduct from Product.stock ─────
+        if (product.stock < item.quantity) {
+          return NextResponse.json(
+            { error: `Insufficient stock for ${product.name}` },
+            { status: 400 }
+          );
+        }
+        product.stock -= item.quantity;
+        product.salesCount += item.quantity;
+        await product.save();
       }
 
       saleItems.push({
@@ -100,11 +150,6 @@ export async function POST(req: NextRequest) {
         cost: product.cost,
         subtotal: item.price * item.quantity
       });
-
-      // Update stock
-      product.stock -= item.quantity;
-      product.salesCount += item.quantity;
-      await product.save();
     }
 
     // Handle customer
@@ -142,6 +187,7 @@ export async function POST(req: NextRequest) {
 
     const sale = await Sale.create({
       tenantId: session.tenantId,
+      branchId: branchId || undefined,
       saleNumber: generateSaleNumber(),
       items: saleItems,
       subtotal,
@@ -169,6 +215,15 @@ export async function POST(req: NextRequest) {
         // Don't fail the sale if discount update fails
       }
     }
+
+    logActivity({
+      tenantId: session.tenantId,
+      userId:   session.userId,
+      action:   'process_sale',
+      entity:   'Sale',
+      entityId: sale._id.toString(),
+      details:  { saleNumber: sale.saleNumber, total: sale.total, itemCount: saleItems.length, paymentMethod },
+    });
 
     // Emit real-time event
     emitToTenant(session.tenantId, 'sale-created', {

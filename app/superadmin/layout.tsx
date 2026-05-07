@@ -94,7 +94,7 @@ export default function SuperAdminLayout({ children }: { children: React.ReactNo
     return (
       <div className="min-h-screen flex items-center justify-center bg-[var(--bg-page)]">
         <div className="text-center space-y-4">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-700 flex items-center justify-center mx-auto shadow-xl">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-700 flex items-center justify-center mx-auto">
             <Crown className="w-7 h-7 text-white" />
           </div>
           <div className="space-y-1.5">
@@ -130,7 +130,6 @@ export default function SuperAdminLayout({ children }: { children: React.ReactNo
           sidebar-transition sidebar-scroll
           w-[260px] bg-[var(--bg-surface)]
           border-r border-[var(--border-subtle)]
-          shadow-[var(--shadow-elevated)]
           ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
           lg:translate-x-0
         `}
@@ -139,7 +138,7 @@ export default function SuperAdminLayout({ children }: { children: React.ReactNo
         <div className="flex-shrink-0 px-5 pt-5 pb-4 border-b border-[var(--border-subtle)]">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-700 flex items-center justify-center shadow-md flex-shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-700 flex items-center justify-center flex-shrink-0">
                 <Crown className="w-5 h-5 text-white" />
               </div>
               <div>

@@ -19,6 +19,7 @@ interface Supplier {
   address?: string;
   website?: string;
   notes?: string;
+  paymentTerms?: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -39,9 +40,12 @@ const inputCls =
   'focus:border-[var(--primary-color)] focus:ring-2 focus:ring-[var(--primary-color)]/20 ' +
   'placeholder:text-[var(--text-tertiary)]';
 
+const PAYMENT_TERMS = ['Net 15', 'Net 30', 'Net 60', 'COD', 'Prepaid'] as const;
+
 const emptyForm = {
   name: '', contactPerson: '', email: '',
   phone: '', address: '', website: '', notes: '',
+  paymentTerms: '',
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -62,7 +66,7 @@ function KpiCard({ label, value, sub, icon: Icon, color }: {
   return (
     <div
       className="rounded-2xl p-5 flex flex-col gap-3"
-      style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-card)' }}
+      style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}
     >
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>{label}</p>
@@ -163,6 +167,7 @@ export default function SuppliersPage() {
       address:       supplier.address       || '',
       website:       supplier.website       || '',
       notes:         supplier.notes         || '',
+      paymentTerms:  supplier.paymentTerms  || '',
     });
     setIsModalOpen(true);
   };
@@ -221,7 +226,7 @@ export default function SuppliersPage() {
           <button
             onClick={() => setIsModalOpen(true)}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
-            style={{ background: 'var(--primary-color)', boxShadow: '0 2px 8px var(--primary-color)44' }}
+            style={{ background: 'var(--primary-color)' }}
           >
             <Plus className="w-4 h-4" /> Add Supplier
           </button>
@@ -239,7 +244,7 @@ export default function SuppliersPage() {
       {/* ── Search bar ── */}
       <div
         className="flex items-center gap-3 rounded-2xl p-3"
-        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-card)' }}
+        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}
       >
         <div className="relative flex-1">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--text-tertiary)' }} />
@@ -314,7 +319,6 @@ export default function SuppliersPage() {
                 style={{
                   background: 'var(--bg-surface)',
                   border: '1px solid var(--border-subtle)',
-                  boxShadow: 'var(--shadow-card)',
                 }}
               >
                 {/* Card body */}
@@ -323,7 +327,7 @@ export default function SuppliersPage() {
                   <div className="flex items-start justify-between gap-3 mb-4">
                     <div className="flex items-center gap-3 min-w-0">
                       <div
-                        className="w-12 h-12 rounded-2xl flex items-center justify-center text-white text-sm font-bold flex-shrink-0 shadow-sm"
+                        className="w-12 h-12 rounded-2xl flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
                         style={{ background: `linear-gradient(135deg, ${av.from}, ${av.to})` }}
                       >
                         {getInitials(supplier.name)}
@@ -410,6 +414,19 @@ export default function SuppliersPage() {
                     )}
                   </div>
 
+                  {/* Payment terms badge */}
+                  {supplier.paymentTerms && (
+                    <div className="mt-3 flex items-center gap-2">
+                      <span
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold"
+                        style={{ background: '#eff6ff', color: '#1d4ed8' }}
+                      >
+                        <Package2 className="w-3 h-3" />
+                        {supplier.paymentTerms}
+                      </span>
+                    </div>
+                  )}
+
                   {/* Notes preview */}
                   {supplier.notes && (
                     <div
@@ -460,7 +477,7 @@ export default function SuppliersPage() {
         >
           <div
             className="w-full max-w-lg max-h-[90vh] flex flex-col rounded-2xl overflow-hidden"
-            style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-floating)' }}
+            style={{ background: 'var(--bg-surface)' }}
           >
             {/* Header */}
             <div
@@ -595,6 +612,21 @@ export default function SuppliersPage() {
                       className={inputCls + ' pl-9 resize-none'}
                     />
                   </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+                    Payment Terms
+                    <span className="text-xs font-normal ml-1" style={{ color: 'var(--text-tertiary)' }}>(optional)</span>
+                  </label>
+                  <select
+                    value={formData.paymentTerms}
+                    onChange={e => field('paymentTerms', e.target.value)}
+                    className={inputCls + ' appearance-none'}
+                  >
+                    <option value="">— Select terms —</option>
+                    {PAYMENT_TERMS.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
                 </div>
               </div>
 

@@ -52,6 +52,8 @@ export async function GET(req: NextRequest) {
           subscriptionStatus: business.subscriptionStatus,
           subscriptionExpiry: business.subscriptionExpiry,
           isActive: business.isActive,
+          approvalStatus: business.approvalStatus ?? 'approved',
+          approvalNotes: business.approvalNotes,
           createdAt: business.createdAt,
           stats: {
             users: userCount,
@@ -199,6 +201,43 @@ export async function POST(req: NextRequest) {
       await business.save();
 
       return NextResponse.json({ success: true, business });
+    }
+
+    if (action === 'approve') {
+      const { businessId, notes } = body;
+      const business = await Business.findById(businessId);
+      if (!business) {
+        return NextResponse.json({ error: 'Business not found' }, { status: 404 });
+      }
+
+      const TRIAL_DAYS = 14;
+      business.approvalStatus = 'approved';
+      business.isActive = true;
+      business.subscriptionStatus = 'trial';
+      // Trial clock starts now — the day the superadmin approves
+      business.subscriptionExpiry = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+      if (notes) business.approvalNotes = notes;
+      await business.save();
+
+      // Activate the business owner user
+      await User.updateMany({ tenantId: business._id }, { isActive: true });
+
+      return NextResponse.json({ success: true });
+    }
+
+    if (action === 'reject') {
+      const { businessId, notes } = body;
+      const business = await Business.findById(businessId);
+      if (!business) {
+        return NextResponse.json({ error: 'Business not found' }, { status: 404 });
+      }
+
+      business.approvalStatus = 'rejected';
+      business.isActive = false;
+      if (notes) business.approvalNotes = notes;
+      await business.save();
+
+      return NextResponse.json({ success: true });
     }
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -9,17 +9,27 @@ import toast from 'react-hot-toast';
 import {
   Store, Mail, Lock, Eye, EyeOff, ArrowLeft,
   CheckCircle2, Zap, WifiOff, BarChart3, ArrowRight, Sun, Moon,
+  AlertCircle, HelpCircle,
 } from 'lucide-react';
 import { useThemeStore } from '@/store/useThemeStore';
 
 const featureHighlights = [
-  { icon: Zap,         text: 'Process sales in under 3 seconds' },
-  { icon: WifiOff,     text: 'Works fully offline, syncs on reconnect' },
-  { icon: BarChart3,   text: 'Real-time analytics & insights' },
-  { icon: CheckCircle2,text: 'Role-based access for your whole team' },
+  { icon: Zap,          text: 'Process sales in under 3 seconds' },
+  { icon: WifiOff,      text: 'Works fully offline, syncs on reconnect' },
+  { icon: BarChart3,    text: 'Real-time analytics & insights' },
+  { icon: CheckCircle2, text: 'Role-based access for your whole team' },
 ];
 
+const REMEMBER_KEY = 'sv_remember_email';
 
+function FieldError({ msg }: { msg: string }) {
+  return (
+    <div className="flex items-center gap-1.5 mt-1.5">
+      <AlertCircle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />
+      <span className="text-xs font-medium text-red-600 dark:text-red-400">{msg}</span>
+    </div>
+  );
+}
 
 export default function LoginPage() {
   const router  = useRouter();
@@ -29,14 +39,49 @@ export default function LoginPage() {
   const [showPass,    setShowPass]    = useState(false);
   const [rememberMe,  setRememberMe]  = useState(false);
   const [formData,    setFormData]    = useState({ email: '', password: '' });
+  const [errors,      setErrors]      = useState<{ email?: string; password?: string }>({});
+  const [mounted,     setMounted]     = useState(false);
   const { theme, toggleTheme } = useThemeStore();
   const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+  const isDev = process.env.NODE_ENV === 'development';
 
+  // On mount: hydrate theme + restore saved email
+  useEffect(() => {
+    setMounted(true);
+    const saved = localStorage.getItem(REMEMBER_KEY);
+    if (saved) {
+      setFormData(f => ({ ...f, email: saved }));
+      setRememberMe(true);
+    }
+  }, []);
+
+  // ── Inline validation ──────────────────────────────────
+  const validate = (): boolean => {
+    const errs: { email?: string; password?: string } = {};
+    if (!formData.email.trim()) {
+      errs.email = 'Email address is required.';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+      errs.email = 'Please enter a valid email address.';
+    }
+    if (!formData.password) {
+      errs.password = 'Password is required.';
+    } else if (formData.password.length < 4) {
+      errs.password = 'Password must be at least 4 characters.';
+    }
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const clearError = (field: 'email' | 'password') =>
+    setErrors(e => ({ ...e, [field]: undefined }));
+
+  // ── Submit ─────────────────────────────────────────────
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!validate()) return;
     setIsLoading(true);
 
-    // Offline login — check localStorage auth
+    // Offline login
     if (!isOnline) {
       const stored = localStorage.getItem('auth-storage');
       if (stored) {
@@ -44,6 +89,8 @@ export default function LoginPage() {
           const { state } = JSON.parse(stored);
           if (state?.user?.email === formData.email) {
             setUser(state.user);
+            if (rememberMe) localStorage.setItem(REMEMBER_KEY, formData.email);
+            else localStorage.removeItem(REMEMBER_KEY);
             toast.success('Signed in offline');
             const roleMap: Record<string, string> = {
               super_admin:     '/superadmin',
@@ -70,12 +117,25 @@ export default function LoginPage() {
 
       const data = await res.json();
 
-      if (!res.ok) throw new Error(data.error || 'Login failed');
+      if (!res.ok) {
+        // Map API errors to inline field errors
+        const msg: string = data.error || 'Login failed';
+        if (msg.toLowerCase().includes('email') || msg.toLowerCase().includes('user') || msg.toLowerCase().includes('found')) {
+          setErrors({ email: msg });
+        } else if (msg.toLowerCase().includes('password') || msg.toLowerCase().includes('credentials') || msg.toLowerCase().includes('incorrect')) {
+          setErrors({ password: 'Incorrect password. Please try again.' });
+        } else {
+          toast.error(msg);
+        }
+        return;
+      }
+
+      // Persist email if remember me
+      if (rememberMe) localStorage.setItem(REMEMBER_KEY, formData.email);
+      else localStorage.removeItem(REMEMBER_KEY);
 
       setUser(data.user);
       toast.success('Welcome back! 🎉');
-
-      // Prefetch data for offline use (non-blocking)
       prefetchOfflineData().catch(() => {});
 
       const roleMap: Record<string, string> = {
@@ -83,7 +143,6 @@ export default function LoginPage() {
         cashier:         '/dashboard/pos',
         inventory_staff: '/dashboard/products',
       };
-      // Hard redirect ensures the browser sends the fresh cookie on the next request
       window.location.href = roleMap[data.user.role] ?? '/dashboard';
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : 'Login failed';
@@ -92,11 +151,16 @@ export default function LoginPage() {
       setIsLoading(false);
     }
   };
-  
+
+  const inputCls = (hasErr?: string) =>
+    `input-base pl-10 transition-all duration-150 ${hasErr ? 'border-red-400 dark:border-red-500 focus:ring-red-400/30 bg-red-50/50 dark:bg-red-950/10' : ''}`;
+
   return (
     <div className="min-h-screen flex bg-[var(--bg-page)]">
+
+      {/* ── Left panel ───────────────────────────────────── */}
       <div className="hidden lg:flex lg:w-[46%] xl:w-5/12 relative flex-col bg-gradient-to-br from-slate-900 via-emerald-950 to-slate-900 overflow-hidden p-10">
-        
+
         <div
           className="absolute inset-0 opacity-[0.04]"
           style={{
@@ -104,14 +168,13 @@ export default function LoginPage() {
             backgroundSize: '40px 40px',
           }}
         />
-        {/* Glows */}
         <div className="absolute top-0 right-0 w-80 h-80 bg-emerald-500/20 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none" />
         <div className="absolute bottom-0 left-0 w-64 h-64 bg-emerald-600/15 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 pointer-events-none" />
 
         <div className="relative z-10 flex flex-col h-full">
           {/* Logo */}
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-500/30">
+            <div className="w-9 h-9 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-xl flex items-center justify-center">
               <Store className="w-5 h-5 text-white" />
             </div>
             <div>
@@ -130,49 +193,33 @@ export default function LoginPage() {
               The all-in-one POS platform with offline support, real-time analytics, and a checkout experience your customers will love.
             </p>
 
-            {/* Feature bullets */}
+            {/* Feature bullets — skeleton until mounted */}
             <div className="space-y-3.5 mb-12">
-              {featureHighlights.map(({ icon: Icon, text }) => (
-                <div key={text} className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/20 flex items-center justify-center flex-shrink-0">
-                    <Icon className="w-4 h-4 text-emerald-400" />
+              {featureHighlights.map(({ icon: Icon, text }, i) =>
+                !mounted ? (
+                  <div key={i} className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-white/10 animate-pulse flex-shrink-0" />
+                    <div className="h-3 rounded bg-white/10 animate-pulse" style={{ width: `${60 + i * 15}%` }} />
                   </div>
-                  <span className="text-sm text-slate-300">{text}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Floating stat card */}
-            <div className="bg-white/8 backdrop-blur-md border border-white/12 rounded-2xl p-5 max-w-xs">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Today&apos;s Revenue</p>
-                <span className="text-[11px] font-bold text-emerald-400 bg-emerald-400/15 px-2 py-0.5 rounded-full">↑ 23.4%</span>
-              </div>
-              <p className="text-3xl font-extrabold text-white mb-3">GH₵18,420.00</p>
-              {/* Mini sparkline */}
-              <div className="flex items-end gap-1 h-10">
-                {[35, 55, 42, 70, 58, 88, 65, 95, 72, 100].map((h, i) => (
-                  <div
-                    key={i}
-                    className="flex-1 bg-emerald-400/60 rounded-sm"
-                    style={{ height: `${h}%` }}
-                  />
-                ))}
-              </div>
-              <div className="flex items-center justify-between mt-3 text-xs text-slate-500">
-                <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span>
-              </div>
+                ) : (
+                  <div key={text} className="flex items-center gap-3 animate-fade-in-up" style={{ animationDelay: `${i * 80}ms` }}>
+                    <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/20 flex items-center justify-center flex-shrink-0">
+                      <Icon className="w-4 h-4 text-emerald-400" />
+                    </div>
+                    <span className="text-sm text-slate-300">{text}</span>
+                  </div>
+                )
+              )}
             </div>
           </div>
 
-          {/* Footer */}
           <div className="text-xs text-slate-600">
             © {new Date().getFullYear()} SmartVendr · Built for modern businesses
           </div>
         </div>
       </div>
 
-      {/* ── Right panel — login form ────────────────────── */}
+      {/* ── Right panel — login form ─────────────────────── */}
       <div className="flex-1 flex flex-col">
         {/* Top bar */}
         <div className="flex items-center justify-between px-6 py-5 lg:px-10">
@@ -183,7 +230,6 @@ export default function LoginPage() {
             <ArrowLeft className="w-4 h-4" />
             Back to home
           </Link>
-          {/* Mobile logo */}
           <div className="flex items-center gap-3">
             <button
               onClick={toggleTheme}
@@ -203,7 +249,7 @@ export default function LoginPage() {
 
         {/* Form container */}
         <div className="flex-1 flex items-center justify-center px-6 py-8 lg:px-14">
-          <div className="w-full max-w-md">
+          <div className="w-full max-w-md animate-fade-in-up">
 
             {/* Heading */}
             <div className="mb-8">
@@ -216,7 +262,7 @@ export default function LoginPage() {
             </div>
 
             {/* Form */}
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-4" noValidate>
               {/* Email */}
               <div>
                 <label className="block text-sm font-semibold text-[var(--text-primary)] mb-1.5">
@@ -224,39 +270,43 @@ export default function LoginPage() {
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                    <Mail className="w-4 h-4 text-[var(--text-tertiary)]" />
+                    <Mail className={`w-4 h-4 ${errors.email ? 'text-red-400' : 'text-[var(--text-tertiary)]'}`} />
                   </div>
                   <input
                     type="email"
                     placeholder="you@company.com"
                     value={formData.email}
-                    onChange={e => setFormData(f => ({ ...f, email: e.target.value }))}
-                    required
+                    onChange={e => { setFormData(f => ({ ...f, email: e.target.value })); clearError('email'); }}
                     autoComplete="email"
-                    className="input-base pl-10"
+                    className={inputCls(errors.email)}
                   />
                 </div>
+                {errors.email && <FieldError msg={errors.email} />}
               </div>
 
               {/* Password */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-sm font-semibold text-[var(--text-primary)]">
-                    Password
-                  </label>
+                  <label className="text-sm font-semibold text-[var(--text-primary)]">Password</label>
+                  <button
+                    type="button"
+                    onClick={() => toast('Contact your admin to reset your password.', { icon: '🔑', duration: 4000 })}
+                    className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline transition-colors"
+                  >
+                    Forgot password?
+                  </button>
                 </div>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                    <Lock className="w-4 h-4 text-[var(--text-tertiary)]" />
+                    <Lock className={`w-4 h-4 ${errors.password ? 'text-red-400' : 'text-[var(--text-tertiary)]'}`} />
                   </div>
                   <input
                     type={showPass ? 'text' : 'password'}
                     placeholder="Enter your password"
                     value={formData.password}
-                    onChange={e => setFormData(f => ({ ...f, password: e.target.value }))}
-                    required
+                    onChange={e => { setFormData(f => ({ ...f, password: e.target.value })); clearError('password'); }}
                     autoComplete="current-password"
-                    className="input-base pl-10 pr-11"
+                    className={`${inputCls(errors.password)} pr-11`}
                   />
                   <button
                     type="button"
@@ -267,6 +317,7 @@ export default function LoginPage() {
                     {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
+                {errors.password && <FieldError msg={errors.password} />}
               </div>
 
               {/* Remember me */}
@@ -287,7 +338,7 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full flex items-center justify-center gap-2 py-3 px-5 text-sm font-bold text-white bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-xl shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 hover:-translate-y-0.5 transition-all disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
+                className="w-full flex items-center justify-center gap-2 py-3 px-5 text-sm font-bold text-white bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-xl hover:-translate-y-0.5 transition-all disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
               >
                 {isLoading ? (
                   <>
@@ -305,8 +356,17 @@ export default function LoginPage() {
                 )}
               </button>
             </form>
+
+            {/* Register link */}
+            <p className="mt-6 text-center text-sm text-[var(--text-secondary)]">
+              Don&apos;t have an account?{' '}
+              <Link href="/register" className="font-semibold text-emerald-600 dark:text-emerald-400 hover:underline">
+                Register your business
+              </Link>
+            </p>
+
             {/* Footer */}
-            <p className="mt-8 text-center text-xs text-[var(--text-tertiary)]">
+            <p className="mt-6 text-center text-xs text-[var(--text-tertiary)]">
               Design by{' '}
               <a
                 href="https://github.com/saanii929-sudo"

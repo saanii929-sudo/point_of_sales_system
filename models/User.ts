@@ -8,6 +8,7 @@ export interface IUser extends Document {
   role: 'super_admin' | 'business_owner' | 'manager' | 'cashier' | 'inventory_staff';
   phone?: string;
   avatar?: string;
+  branchId?: mongoose.Types.ObjectId;
   isActive: boolean;
   lastLogin?: Date;
   createdAt: Date;
@@ -19,13 +20,14 @@ const UserSchema = new Schema<IUser>({
   email: { type: String, required: true, unique: true, lowercase: true },
   password: { type: String, required: true },
   name: { type: String, required: true },
-  role: { 
-    type: String, 
+  role: {
+    type: String,
     enum: ['super_admin', 'business_owner', 'manager', 'cashier', 'inventory_staff'],
     default: 'cashier'
   },
   phone: String,
   avatar: String,
+  branchId: { type: Schema.Types.ObjectId, ref: 'Branch', required: false },
   isActive: { type: Boolean, default: true },
   lastLogin: Date
 }, { timestamps: true });

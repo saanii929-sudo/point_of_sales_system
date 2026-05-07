@@ -5,8 +5,9 @@ import toast from 'react-hot-toast';
 import { fetchWithOfflineFallback } from '@/lib/offlineDataCache';
 import {
   Users, UserPlus, Search, X, Mail, Phone, Shield, Briefcase,
-  UserCheck, UserX, Loader2, ChevronDown,
+  UserCheck, UserX, Loader2, ChevronDown, Building2,
 } from 'lucide-react';
+import { useBranchStore } from '@/store/useBranchStore';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Employee {
@@ -16,6 +17,7 @@ interface Employee {
   role: string;
   phone?: string;
   isActive: boolean;
+  branchId?: string | null;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -43,7 +45,7 @@ const inputCls =
   'focus:border-[var(--primary-color)] focus:ring-2 focus:ring-[var(--primary-color)]/20 ' +
   'placeholder:text-[var(--text-tertiary)]';
 
-const emptyForm = { name: '', email: '', password: '', role: 'cashier', phone: '' };
+const emptyForm = { name: '', email: '', password: '', role: 'cashier', phone: '', branchId: '' };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function avatarColor(name: string) {
@@ -77,7 +79,7 @@ function KpiCard({ label, value, sub, icon: Icon, color }: {
   return (
     <div
       className="rounded-2xl p-5 flex flex-col gap-3"
-      style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-card)' }}
+      style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}
     >
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>{label}</p>
@@ -110,6 +112,9 @@ function SkeletonCard() {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function EmployeesPage() {
+  const { branches } = useBranchStore();
+  const activeBranches = branches.filter(b => b.isActive);
+
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [isFetching, setIsFetching] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -197,7 +202,7 @@ export default function EmployeesPage() {
         <button
           onClick={() => setIsModalOpen(true)}
           className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
-          style={{ background: 'var(--primary-color)', boxShadow: '0 2px 8px var(--primary-color)44' }}
+          style={{ background: 'var(--primary-color)' }}
         >
           <UserPlus className="w-4 h-4" />
           Add Employee
@@ -215,7 +220,7 @@ export default function EmployeesPage() {
       {/* ── Search & Filter ── */}
       <div
         className="flex flex-wrap items-center gap-3 rounded-2xl p-4"
-        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-card)' }}
+        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}
       >
         {/* Search */}
         <div className="relative flex-1 min-w-48">
@@ -305,11 +310,10 @@ export default function EmployeesPage() {
             return (
               <div
                 key={employee._id}
-                className="rounded-2xl p-5 transition-all hover:shadow-md group"
+                className="rounded-2xl p-5 transition-all group"
                 style={{
                   background: 'var(--bg-surface)',
                   border: '1px solid var(--border-subtle)',
-                  boxShadow: 'var(--shadow-card)',
                 }}
               >
                 {/* Top row: avatar + status */}
@@ -369,6 +373,15 @@ export default function EmployeesPage() {
                       <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>No phone on file</span>
                     </div>
                   )}
+                  {/* Branch */}
+                  <div className="flex items-center gap-2">
+                    <Building2 className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--text-tertiary)' }} />
+                    <span className="text-xs" style={{ color: employee.branchId ? 'var(--text-secondary)' : 'var(--text-tertiary)' }}>
+                      {employee.branchId
+                        ? (activeBranches.find(b => b._id === employee.branchId)?.name ?? 'Branch')
+                        : 'No branch assigned'}
+                    </span>
+                  </div>
                 </div>
               </div>
             );
@@ -384,7 +397,7 @@ export default function EmployeesPage() {
         >
           <div
             className="w-full max-w-md rounded-2xl overflow-hidden"
-            style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-floating)' }}
+            style={{ background: 'var(--bg-surface)' }}
           >
             {/* Modal header */}
             <div
@@ -512,6 +525,36 @@ export default function EmployeesPage() {
                       {formData.role === 'manager'         && 'Full access except business settings and billing.'}
                     </p>
                   )}
+                </div>
+
+                {/* Branch assignment */}
+                <div>
+                  <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+                    Assign Branch <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  {activeBranches.length === 0 ? (
+                    <p className="text-xs px-3 py-2.5 rounded-xl border" style={{ borderColor: 'var(--border-default)', color: 'var(--text-tertiary)' }}>
+                      No active branches. Create a branch first.
+                    </p>
+                  ) : (
+                    <div className="relative">
+                      <select
+                        required
+                        value={formData.branchId}
+                        onChange={e => setFormData(f => ({ ...f, branchId: e.target.value }))}
+                        className={inputCls + ' appearance-none pr-9'}
+                      >
+                        <option value="">— Select branch —</option>
+                        {activeBranches.map(b => (
+                          <option key={b._id} value={b._id}>{b.name}</option>
+                        ))}
+                      </select>
+                      <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--text-tertiary)' }} />
+                    </div>
+                  )}
+                  <p className="text-xs mt-1.5" style={{ color: 'var(--text-tertiary)' }}>
+                    The employee will only see data for their assigned branch.
+                  </p>
                 </div>
               </div>
 

@@ -3,9 +3,11 @@ import mongoose, { Schema, Document, Model } from 'mongoose';
 export interface IBusiness extends Document {
   name: string;
   email: string;
-  phone: string;
-  address: string;
+  phone?: string;
+  address?: string;
   logo?: string;
+  approvalStatus: 'pending' | 'approved' | 'rejected';
+  approvalNotes?: string;
   branding: {
     primaryColor: string;
     secondaryColor: string;
@@ -16,7 +18,7 @@ export interface IBusiness extends Document {
   };
   subscriptionPlan: string;
   subscriptionStatus: 'active' | 'inactive' | 'trial' | 'expired';
-  subscriptionExpiry: Date;
+  subscriptionExpiry?: Date | null;
   settings: {
     currency: string;
     taxRate: number;
@@ -35,9 +37,15 @@ export interface IBusiness extends Document {
 const BusinessSchema = new Schema<IBusiness>({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
-  phone: { type: String, required: true },
-  address: { type: String, required: true },
+  phone: { type: String, default: '' },
+  address: { type: String, default: '' },
   logo: String,
+  approvalStatus: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected'],
+    default: 'approved',  // existing/superadmin-created businesses are auto-approved
+  },
+  approvalNotes: String,
   branding: {
     primaryColor: { type: String, default: '#10b981' }, // green-500
     secondaryColor: { type: String, default: '#059669' }, // emerald-600
@@ -55,7 +63,7 @@ const BusinessSchema = new Schema<IBusiness>({
     enum: ['active', 'inactive', 'trial', 'expired'],
     default: 'trial'
   },
-  subscriptionExpiry: { type: Date, required: true },
+  subscriptionExpiry: { type: Date, default: null },
   settings: {
     currency: { type: String, default: 'USD' },
     taxRate: { type: Number, default: 0 },

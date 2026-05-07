@@ -4,19 +4,27 @@ import { useEffect, useState } from 'react';
 import { Toaster } from 'react-hot-toast';
 import { useThemeStore } from '@/store/useThemeStore';
 import { prefetchOfflineData } from '@/lib/offlineDataCache';
+import { isLocalhost } from '@/lib/env';
 
 function ServiceWorkerRegistrar() {
   useEffect(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+    if (isLocalhost()) return; // disable offline support in local development
+
+    // Guard: only run prefetch once per page lifecycle, regardless of how many
+    // SW events fire (statechange + controllerchange both fire on first activation).
+    let prefetchTriggered = false;
 
     const triggerPrefetch = () => {
+      if (prefetchTriggered) return;
+      prefetchTriggered = true;
       try {
         const ctrl = navigator.serviceWorker.controller;
         if (ctrl) {
           ctrl.postMessage({ type: 'PREFETCH_API' });
         }
       } catch {}
-      // Also prefetch into IndexedDB regardless
+      // Also populate IndexedDB cache regardless of SW availability
       prefetchOfflineData().catch(() => {});
     };
 
@@ -47,10 +55,9 @@ function ServiceWorkerRegistrar() {
         prefetchOfflineData().catch(() => {});
       });
 
-    // Also listen for controller change (e.g. after skipWaiting + clients.claim)
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      triggerPrefetch();
-    });
+    // controllerchange fires when clients.claim() takes effect after skipWaiting —
+    // the prefetchTriggered guard prevents a duplicate run alongside statechange.
+    navigator.serviceWorker.addEventListener('controllerchange', triggerPrefetch);
   }, []);
 
   return null;
@@ -62,6 +69,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     setMounted(true);
+    // Rehydrate after mount so the server and client initial renders both use
+    // the default theme ('light'), preventing a Zustand/useSyncExternalStore
+    // hydration mismatch that would cascade into other components on the page.
+    useThemeStore.persist.rehydrate();
   }, []);
 
   useEffect(() => {

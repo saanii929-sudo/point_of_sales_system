@@ -3,6 +3,8 @@ import { connectDB } from '@/lib/db';
 import { verifyPassword, generateToken, setAuthCookieOnResponse } from '@/lib/auth';
 import User from '@/models/User';
 import Business from '@/models/Business';
+import { getSubscriptionState, subscriptionDeniedResponse } from '@/lib/subscription';
+import { logActivity } from '@/lib/logActivity';
 
 export async function POST(req: NextRequest) {
   try {
@@ -43,18 +45,47 @@ export async function POST(req: NextRequest) {
     // Check business status (if not super admin)
     if (user.role !== 'super_admin') {
       const business = await Business.findById(user.tenantId);
-      if (!business || !business.isActive) {
-        console.log('Business inactive');
+      if (!business) {
+        return NextResponse.json({ error: 'Business account not found' }, { status: 403 });
+      }
+      if (business.approvalStatus === 'pending') {
         return NextResponse.json(
-          { error: 'Business account is inactive' },
+          { error: 'Your account is awaiting approval. Please contact the admin to complete your onboarding.' },
           { status: 403 }
         );
+      }
+      if (business.approvalStatus === 'rejected') {
+        return NextResponse.json(
+          { error: 'Your registration was not approved. Please contact support for more information.' },
+          { status: 403 }
+        );
+      }
+      if (!business.isActive) {
+        return NextResponse.json({ error: 'Your business account has been deactivated.' }, { status: 403 });
+      }
+
+      // Enforce subscription expiry
+      const sub = getSubscriptionState(business);
+      if (!sub.isActive) {
+        return NextResponse.json({ ...subscriptionDeniedResponse(sub), subscriptionExpired: true }, { status: 403 });
       }
     }
 
     // Update last login
     user.lastLogin = new Date();
     await user.save();
+
+    logActivity({
+      tenantId:  user.tenantId?.toString() || '',
+      userId:    user._id.toString(),
+      action:    'login',
+      entity:    'User',
+      entityId:  user._id.toString(),
+      details:   { name: user.name, role: user.role },
+      ipAddress: req.headers.get('x-forwarded-for')?.split(',')[0].trim()
+                 || req.headers.get('x-real-ip')
+                 || undefined,
+    });
 
     // Generate token
     const token = generateToken({

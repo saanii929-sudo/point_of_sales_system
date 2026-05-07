@@ -107,7 +107,14 @@ export async function deleteHeldCart(id: string) {
 }
 
 // Sync offline sales
+let _isSyncing = false;
+
 export async function syncOfflineSales() {
+  // Prevent concurrent sync runs — avoids duplicate transactions if called
+  // from both the POS page effect and the OfflineBanner auto-sync simultaneously.
+  if (_isSyncing) return [];
+  _isSyncing = true;
+
   try {
     const offlineSales = await getOfflineSales();
     const results = [];
@@ -144,5 +151,11 @@ export async function syncOfflineSales() {
   } catch (error) {
     console.error('Sync error:', error);
     return [];
+  } finally {
+    _isSyncing = false;
   }
+}
+
+export function getPendingOfflineSalesCount(): Promise<number> {
+  return getOfflineSales().then((sales) => sales.length).catch(() => 0);
 }

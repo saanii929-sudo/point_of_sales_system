@@ -2,23 +2,16 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Card, CardBody, CardHeader } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
+import Link from 'next/link';
 import { useAuthStore } from '@/store/useAuthStore';
 import toast from 'react-hot-toast';
 import { fetchWithOfflineFallback } from '@/lib/offlineDataCache';
-import { format } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 import {
-  Building2,
-  CheckCircle2,
-  Users,
-  DollarSign,
-  Package,
-  ShoppingCart,
-  Award,
-  Medal,
-  Trophy,
-  TrendingUp
+  Building2, CheckCircle2, Users, DollarSign, Package,
+  ShoppingCart, TrendingUp, ArrowUpRight, Medal, Award,
+  Trophy, RefreshCw, Crown, Activity, ChevronRight,
+  Clock, AlertCircle, BarChart3,
 } from 'lucide-react';
 
 interface SuperAdminStats {
@@ -39,226 +32,241 @@ interface SuperAdminStats {
     name: string;
     email: string;
     subscriptionPlan: string;
+    approvalStatus: string;
+    isActive: boolean;
     createdAt: string;
   }>;
 }
 
-export default function SuperAdminDashboard() {
-  const router = useRouter();
-  const { user } = useAuthStore();
-  const [stats, setStats] = useState<SuperAdminStats | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+function fmt(n: number) {
+  if (n >= 1_000_000) return `GH₵${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000)     return `GH₵${(n / 1_000).toFixed(1)}k`;
+  return `GH₵${n.toFixed(0)}`;
+}
 
-  useEffect(() => {
-    if (!user || user.role !== 'super_admin') {
-      router.push('/dashboard');
-      return;
-    }
-    fetchStats();
-  }, [user, router]);
-
-  const fetchStats = async () => {
-    try {
-      const { data } = await fetchWithOfflineFallback('/api/superadmin/stats');
-      setStats(data);
-    } catch (error) {
-      toast.error('Failed to load stats');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  if (isLoading) {
-    return <div className="flex items-center justify-center h-screen">Loading...</div>;
-  }
-
-  if (!stats) return null;
-
+function KpiCard({ label, value, sub, icon: Icon, color, trend }: {
+  label: string; value: string | number; sub?: string;
+  icon: React.ElementType; color: string; trend?: string;
+}) {
   return (
-    <div className="min-h-screen p-6 bg-gradient-to-br from-white via-white to-white dark:from-gray-900 dark:via-purple-900/20 dark:to-pink-900/20">
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex justify-between items-center">
-          <div>
-            <h1 className="text-4xl font-bold gradient-text mb-2">Super Admin Dashboard</h1>
-            <p className="text-gray-600 dark:text-gray-400">Platform Overview & Management</p>
-          </div>
-          <Button onClick={() => router.push('/superadmin/businesses')}>
-            Manage Businesses →
-          </Button>
-        </div>
-
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <Card glass hover>
-            <CardBody>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Total Businesses</p>
-                  <p className="text-3xl font-bold mt-1">{stats.overview.totalBusinesses}</p>
-                  <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                    <TrendingUp className="w-3 h-3" />
-                    +{stats.overview.newBusinessesThisMonth} this month
-                  </p>
-                </div>
-                <div className="w-16 h-16 bg-gradient-to-br from-blue-400 to-blue-600 rounded-2xl flex items-center justify-center">
-                  <Building2 className="w-8 h-8 text-white" />
-                </div>
-              </div>
-            </CardBody>
-          </Card>
-
-          <Card glass hover>
-            <CardBody>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Active Businesses</p>
-                  <p className="text-3xl font-bold mt-1 text-green-600">{stats.overview.activeBusinesses}</p>
-                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                    {stats.overview.inactiveBusinesses} inactive
-                  </p>
-                </div>
-                <div className="w-16 h-16 bg-gradient-to-br from-green-400 to-emerald-600 rounded-2xl flex items-center justify-center">
-                  <CheckCircle2 className="w-8 h-8 text-white" />
-                </div>
-              </div>
-            </CardBody>
-          </Card>
-
-          <Card glass hover>
-            <CardBody>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Total Users</p>
-                  <p className="text-3xl font-bold mt-1">{stats.overview.totalUsers}</p>
-                </div>
-                <div className="w-16 h-16 bg-gradient-to-br from-purple-400 to-purple-600 rounded-2xl flex items-center justify-center">
-                  <Users className="w-8 h-8 text-white" />
-                </div>
-              </div>
-            </CardBody>
-          </Card>
-
-          <Card glass hover>
-            <CardBody>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Total Revenue</p>
-                  <p className="text-3xl font-bold mt-1 text-green-600">
-                    ${stats.overview.totalRevenue.toFixed(0)}
-                  </p>
-                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                    ${stats.overview.totalProfit.toFixed(0)} profit
-                  </p>
-                </div>
-                <div className="w-16 h-16 bg-gradient-to-br from-emerald-400 to-green-600 rounded-2xl flex items-center justify-center">
-                  <DollarSign className="w-8 h-8 text-white" />
-                </div>
-              </div>
-            </CardBody>
-          </Card>
-
-          <Card glass hover>
-            <CardBody>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Total Products</p>
-                  <p className="text-3xl font-bold mt-1">{stats.overview.totalProducts}</p>
-                </div>
-                <div className="w-16 h-16 bg-gradient-to-br from-orange-400 to-red-600 rounded-2xl flex items-center justify-center">
-                  <Package className="w-8 h-8 text-white" />
-                </div>
-              </div>
-            </CardBody>
-          </Card>
-
-          <Card glass hover>
-            <CardBody>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Total Sales</p>
-                  <p className="text-3xl font-bold mt-1">{stats.overview.totalSales}</p>
-                </div>
-                <div className="w-16 h-16 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-2xl flex items-center justify-center">
-                  <ShoppingCart className="w-8 h-8 text-white" />
-                </div>
-              </div>
-            </CardBody>
-          </Card>
-        </div>
-
-        {/* Subscription Breakdown */}
-        <Card glass>
-          <CardHeader>
-            <h2 className="text-xl font-bold flex items-center gap-2">
-              <Award className="w-6 h-6" />
-              Subscription Plans
-            </h2>
-          </CardHeader>
-          <CardBody>
-            <div className="grid grid-cols-3 gap-6">
-              <div className="text-center p-6 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-2xl">
-                <div className="w-16 h-16 bg-gradient-to-br from-amber-400 to-amber-600 rounded-2xl flex items-center justify-center mx-auto mb-3">
-                  <Medal className="w-8 h-8 text-white" />
-                </div>
-                <p className="text-2xl font-bold">{stats.subscriptionBreakdown.starter || 0}</p>
-                <p className="text-sm text-gray-600 dark:text-gray-400">Starter</p>
-              </div>
-              <div className="text-center p-6 bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 rounded-2xl">
-                <div className="w-16 h-16 bg-gradient-to-br from-gray-400 to-gray-600 rounded-2xl flex items-center justify-center mx-auto mb-3">
-                  <Award className="w-8 h-8 text-white" />
-                </div>
-                <p className="text-2xl font-bold">{stats.subscriptionBreakdown.professional || 0}</p>
-                <p className="text-sm text-gray-600 dark:text-gray-400">Professional</p>
-              </div>
-              <div className="text-center p-6 bg-gradient-to-br from-yellow-50 to-yellow-100 dark:from-yellow-900/20 dark:to-yellow-800/20 rounded-2xl">
-                <div className="w-16 h-16 bg-gradient-to-br from-yellow-400 to-yellow-600 rounded-2xl flex items-center justify-center mx-auto mb-3">
-                  <Trophy className="w-8 h-8 text-white" />
-                </div>
-                <p className="text-2xl font-bold">{stats.subscriptionBreakdown.enterprise || 0}</p>
-                <p className="text-sm text-gray-600 dark:text-gray-400">Enterprise</p>
-              </div>
-            </div>
-          </CardBody>
-        </Card>
-
-        {/* Recent Businesses */}
-        <Card glass>
-          <CardHeader>
-            <div className="flex justify-between items-center">
-              <h2 className="text-xl font-bold">Recent Businesses</h2>
-              <Button variant="ghost" onClick={() => router.push('/superadmin/businesses')}>
-                View All →
-              </Button>
-            </div>
-          </CardHeader>
-          <CardBody>
-            <div className="space-y-3">
-              {stats.recentBusinesses.map((business) => (
-                <div
-                  key={business.id}
-                  className="flex items-center justify-between p-4 glass-card rounded-xl hover:scale-[1.02] transition-transform cursor-pointer"
-                  onClick={() => router.push(`/superadmin/businesses/${business.id}`)}
-                >
-                  <div>
-                    <p className="font-semibold">{business.name}</p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">{business.email}</p>
-                  </div>
-                  <div className="text-right">
-                    <span className="px-3 py-1 bg-primary-gradient-r text-white rounded-full text-xs font-semibold">
-                      {business.subscriptionPlan}
-                    </span>
-                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                      {format(new Date(business.createdAt), 'MMM dd, yyyy')}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardBody>
-        </Card>
+    <div className="rounded-2xl p-5 flex flex-col gap-3"
+      style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)'}}>
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>{label}</p>
+        <span className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: color + '22' }}>
+          <Icon className="w-4 h-4" style={{ color }} />
+        </span>
+      </div>
+      <div>
+        <p className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>{value}</p>
+        {sub && <p className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{sub}</p>}
+        {trend && (
+          <p className="text-xs mt-1 flex items-center gap-1 font-medium" style={{ color: '#10b981' }}>
+            <ArrowUpRight className="w-3 h-3" />{trend}
+          </p>
+        )}
       </div>
     </div>
   );
 }
 
+function SkeletonCard() {
+  return (
+    <div className="rounded-2xl p-5 animate-pulse" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}>
+      <div className="flex items-center justify-between mb-3">
+        <div className="h-3 w-24 rounded" style={{ background: 'var(--bg-surface-2)' }} />
+        <div className="w-9 h-9 rounded-xl" style={{ background: 'var(--bg-surface-2)' }} />
+      </div>
+      <div className="h-7 w-16 rounded-lg" style={{ background: 'var(--bg-surface-3)' }} />
+    </div>
+  );
+}
+
+const PLAN_CONFIG: Record<string, { label: string; icon: React.ElementType; from: string; to: string; bg: string; text: string }> = {
+  starter:      { label: 'Starter',      icon: Medal,  from: '#f59e0b', to: '#d97706', bg: '#fffbeb', text: '#92400e' },
+  professional: { label: 'Professional', icon: Award,  from: '#8b5cf6', to: '#7c3aed', bg: '#ede9fe', text: '#5b21b6' },
+  enterprise:   { label: 'Enterprise',   icon: Trophy, from: '#10b981', to: '#059669', bg: '#d1fae5', text: '#065f46' },
+};
+
+export default function SuperAdminDashboard() {
+  const router = useRouter();
+  const { user } = useAuthStore();
+  const [stats, setStats]     = useState<SuperAdminStats | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    document.title = 'Platform Overview | SmartVendr Admin';
+    if (!user || user.role !== 'super_admin') { router.push('/dashboard'); return; }
+    load();
+  }, [user, router]);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const { data } = await fetchWithOfflineFallback('/api/superadmin/stats');
+      setStats(data);
+    } catch { toast.error('Failed to load platform stats'); }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <div className="space-y-6 pb-10">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-3 mb-1">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center"
+              style={{ background: 'linear-gradient(135deg, #8b5cf6, #7c3aed)' }}>
+              <Crown className="w-4 h-4 text-white" />
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>
+              Platform Overview
+            </h1>
+          </div>
+          <p className="text-sm pl-12" style={{ color: 'var(--text-secondary)' }}>
+            All businesses, users, and revenue across SmartVendr
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={load}
+            className="p-2.5 rounded-xl transition-all hover:opacity-80"
+            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', color: 'var(--text-secondary)' }}>
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+          <Link href="/superadmin/businesses"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"
+            style={{ background: 'linear-gradient(135deg, #8b5cf6, #7c3aed)' }}>
+            Manage Businesses <ChevronRight className="w-4 h-4" />
+          </Link>
+        </div>
+      </div>
+
+      {/* KPI Grid */}
+      {loading ? (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[0,1,2,3,4,5,6,7].map(i => <SkeletonCard key={i} />)}
+        </div>
+      ) : stats ? (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <KpiCard label="Total Businesses"  value={stats.overview.totalBusinesses}  icon={Building2}    color="#8b5cf6" trend={`+${stats.overview.newBusinessesThisMonth} this month`} />
+          <KpiCard label="Active Businesses" value={stats.overview.activeBusinesses}  icon={CheckCircle2} color="#10b981" sub={`${stats.overview.inactiveBusinesses} inactive`} />
+          <KpiCard label="Total Users"       value={stats.overview.totalUsers}        icon={Users}        color="#3b82f6" />
+          <KpiCard label="Total Products"    value={stats.overview.totalProducts}     icon={Package}      color="#f59e0b" />
+          <KpiCard label="Total Sales"       value={stats.overview.totalSales.toLocaleString()} icon={ShoppingCart} color="#06b6d4" />
+          <KpiCard label="Total Revenue"     value={fmt(stats.overview.totalRevenue)} icon={DollarSign}   color="#10b981" sub={`${fmt(stats.overview.totalProfit)} profit`} />
+          <KpiCard label="Avg Revenue / Biz" value={stats.overview.activeBusinesses > 0 ? fmt(stats.overview.totalRevenue / stats.overview.activeBusinesses) : 'GH₵0'} icon={BarChart3} color="#ec4899" />
+          <KpiCard label="New This Month"    value={stats.overview.newBusinessesThisMonth} icon={TrendingUp} color="#f97316" sub="new registrations" />
+        </div>
+      ) : null}
+
+      {/* Subscription Breakdown */}
+      {stats && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {Object.entries(PLAN_CONFIG).map(([key, cfg]) => {
+            const count = stats.subscriptionBreakdown[key] || 0;
+            const total = stats.overview.totalBusinesses || 1;
+            const pct   = Math.round((count / total) * 100);
+            const Icon  = cfg.icon;
+            return (
+              <div key={key} className="rounded-2xl p-5"
+                style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}>
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white"
+                    style={{ background: `linear-gradient(135deg, ${cfg.from}, ${cfg.to})` }}>
+                    <Icon className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p className="font-bold" style={{ color: 'var(--text-primary)' }}>{cfg.label}</p>
+                    <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Subscription plan</p>
+                  </div>
+                  <span className="ml-auto text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{count}</span>
+                </div>
+                <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--bg-surface-3)' }}>
+                  <div className="h-full rounded-full transition-all duration-700"
+                    style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${cfg.from}, ${cfg.to})` }} />
+                </div>
+                <p className="text-xs mt-1.5" style={{ color: 'var(--text-tertiary)' }}>{pct}% of all businesses</p>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Recent Businesses */}
+      {stats && (
+        <div className="rounded-2xl overflow-hidden"
+          style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}>
+          <div className="flex items-center justify-between px-5 py-4"
+            style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+            <div className="flex items-center gap-2">
+              <Activity className="w-4 h-4" style={{ color: 'var(--text-tertiary)' }} />
+              <h2 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>Recent Registrations</h2>
+            </div>
+            <Link href="/superadmin/businesses"
+              className="text-xs font-semibold flex items-center gap-1 transition-opacity hover:opacity-70"
+              style={{ color: '#8b5cf6' }}>
+              View all <ChevronRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
+          {stats.recentBusinesses.length === 0 ? (
+            <div className="py-12 text-center">
+              <Building2 className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--text-tertiary)' }} />
+              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>No businesses registered yet</p>
+            </div>
+          ) : (
+            <div className="divide-y" style={{ borderColor: 'var(--border-subtle)' }}>
+              {stats.recentBusinesses.map(biz => {
+                const planCfg = PLAN_CONFIG[biz.subscriptionPlan] ?? PLAN_CONFIG.starter;
+                const isPending = biz.approvalStatus === 'pending';
+                return (
+                  <Link key={biz.id} href={`/superadmin/businesses/${biz.id}`}
+                    className="flex items-center gap-4 px-5 py-4 transition-colors hover:bg-[var(--bg-surface-2)] group">
+                    {/* Avatar */}
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
+                      style={{ background: `linear-gradient(135deg, ${planCfg.from}, ${planCfg.to})` }}>
+                      {biz.name.charAt(0).toUpperCase()}
+                    </div>
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{biz.name}</p>
+                      <p className="text-xs truncate" style={{ color: 'var(--text-tertiary)' }}>{biz.email}</p>
+                    </div>
+                    {/* Plan badge */}
+                    <span className="hidden sm:inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold"
+                      style={{ background: planCfg.bg, color: planCfg.text }}>
+                      {planCfg.label}
+                    </span>
+                    {/* Status */}
+                    {isPending ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold"
+                        style={{ background: '#fef3c7', color: '#92400e' }}>
+                        <Clock className="w-3 h-3" /> Pending
+                      </span>
+                    ) : biz.isActive ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold"
+                        style={{ background: '#d1fae5', color: '#065f46' }}>
+                        <CheckCircle2 className="w-3 h-3" /> Active
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold"
+                        style={{ background: '#fef2f2', color: '#991b1b' }}>
+                        <AlertCircle className="w-3 h-3" /> Inactive
+                      </span>
+                    )}
+                    {/* Time */}
+                    <p className="hidden md:block text-xs flex-shrink-0" style={{ color: 'var(--text-tertiary)' }}>
+                      {formatDistanceToNow(new Date(biz.createdAt), { addSuffix: true })}
+                    </p>
+                    <ChevronRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                      style={{ color: 'var(--text-tertiary)' }} />
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

@@ -3,6 +3,7 @@ import { connectDB } from '@/lib/db';
 import { getSession } from '@/lib/auth';
 import Sale from '@/models/Sale';
 import Product from '@/models/Product';
+import BranchInventory from '@/models/BranchInventory';
 import Customer from '@/models/Customer';
 import Category from '@/models/Category';
 
@@ -21,25 +22,23 @@ export async function GET(req: NextRequest) {
     await connectDB();
 
     const { searchParams } = new URL(req.url);
-    const range = searchParams.get('range') || 'month';
+    const range    = searchParams.get('range')    || 'month';
+    const branchId = searchParams.get('branchId') || null;
 
     // Calculate date range
     let startDate = new Date();
-    if (range === 'week') {
-      startDate.setDate(startDate.getDate() - 7);
-    } else if (range === 'month') {
-      startDate.setDate(startDate.getDate() - 30);
-    } else if (range === 'year') {
-      startDate.setFullYear(startDate.getFullYear() - 1);
-    }
+    if (range === 'week')  startDate.setDate(startDate.getDate() - 7);
+    else if (range === 'month') startDate.setDate(startDate.getDate() - 30);
+    else if (range === 'year')  startDate.setFullYear(startDate.getFullYear() - 1);
 
     // Super admin can see all data, others only their tenant
     const tenantQuery = session.role === 'super_admin' ? {} : { tenantId: session.tenantId };
-    const salesQuery = {
+    const salesQuery: any = {
       ...tenantQuery,
       status: 'completed',
-      createdAt: { $gte: startDate }
+      createdAt: { $gte: startDate },
     };
+    if (branchId && session.role !== 'super_admin') salesQuery.branchId = branchId;
 
     // Fetch all sales for the period
     const sales = await Sale.find(salesQuery).populate('customer', 'name');
@@ -88,10 +87,24 @@ export async function GET(req: NextRequest) {
 
     // INVENTORY REPORT
     const products = await Product.find({ ...tenantQuery, isActive: true });
-    const totalProducts = products.length;
-    const totalValue = products.reduce((sum, p) => sum + (p.stock * p.cost), 0);
-    const lowStockItems = products.filter(p => p.stock <= p.lowStockThreshold && p.stock > 0).length;
-    const outOfStockItems = products.filter(p => p.stock === 0).length;
+
+    // Use branch-specific stock when branchId is provided
+    let stockMap: Map<string, number>;
+    if (branchId && session.role !== 'super_admin') {
+      const branchInventory = await BranchInventory.find({
+        tenantId: session.tenantId,
+        branch:   branchId,
+      });
+      stockMap = new Map(branchInventory.map(bi => [bi.product.toString(), bi.stock]));
+    } else {
+      stockMap = new Map(products.map(p => [p._id.toString(), p.stock]));
+    }
+    const getStock = (id: string) => stockMap.get(id) ?? 0;
+
+    const totalProducts   = products.length;
+    const totalValue      = products.reduce((sum, p) => sum + getStock(p._id.toString()) * p.cost, 0);
+    const lowStockItems   = products.filter(p => { const s = getStock(p._id.toString()); return s > 0 && s <= p.lowStockThreshold; }).length;
+    const outOfStockItems = products.filter(p => getStock(p._id.toString()) === 0).length;
 
     // Category breakdown
     const categories = await Category.find({ ...tenantQuery, isActive: true });
@@ -101,7 +114,7 @@ export async function GET(req: NextRequest) {
       const categoryProducts = products.filter(p => p.category.toString() === category._id.toString());
       categoryMap[category.name] = {
         count: categoryProducts.length,
-        value: categoryProducts.reduce((sum, p) => sum + (p.stock * p.cost), 0)
+        value: categoryProducts.reduce((sum, p) => sum + getStock(p._id.toString()) * p.cost, 0)
       };
     }
 
@@ -120,7 +133,7 @@ export async function GET(req: NextRequest) {
         return {
           product: data.name,
           sold: data.quantity,
-          remaining: product?.stock || 0
+          remaining: product ? getStock(product._id.toString()) : 0
         };
       });
 

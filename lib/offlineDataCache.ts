@@ -1,4 +1,5 @@
 import { openDB, IDBPDatabase } from 'idb';
+import { isLocalhost } from '@/lib/env';
 
 const DB_NAME = 'smartvendr-offline';
 const DB_VERSION = 2; // Bump version to trigger upgrade
@@ -45,8 +46,15 @@ export async function getCacheMeta(key: string): Promise<number | null> {
   return (await db.get(META_STORE, key)) ?? null;
 }
 
+// Prevent concurrent prefetch runs (both statechange and controllerchange
+// events in Providers.tsx can fire in quick succession on first SW activation).
+let _isPrefetching = false;
+
 // Prefetch all critical data for offline use
 export async function prefetchOfflineData() {
+  if (isLocalhost()) return [];
+  if (_isPrefetching) return [];
+  _isPrefetching = true;
   const endpoints = [
     '/api/products',
     '/api/categories',
@@ -70,19 +78,23 @@ export async function prefetchOfflineData() {
 
   const results: { url: string; success: boolean }[] = [];
 
-  for (const url of endpoints) {
-    try {
-      const res = await fetch(url, { credentials: 'include' });
-      if (res.ok) {
-        const data = await res.json();
-        await cacheData(url, data);
-        results.push({ url, success: true });
-      } else {
+  try {
+    for (const url of endpoints) {
+      try {
+        const res = await fetch(url, { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          await cacheData(url, data);
+          results.push({ url, success: true });
+        } else {
+          results.push({ url, success: false });
+        }
+      } catch {
         results.push({ url, success: false });
       }
-    } catch {
-      results.push({ url, success: false });
     }
+  } finally {
+    _isPrefetching = false;
   }
 
   return results;
@@ -90,6 +102,14 @@ export async function prefetchOfflineData() {
 
 // Get data with offline fallback — uses URL as cache key
 export async function fetchWithOfflineFallback(url: string, cacheKey?: string) {
+  // On localhost, skip all caching and always hit the network directly
+  if (isLocalhost()) {
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+    const data = await res.json();
+    return { data, fromCache: false };
+  }
+
   const key = cacheKey || url;
 
   if (typeof navigator !== 'undefined' && navigator.onLine) {

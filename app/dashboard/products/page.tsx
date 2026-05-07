@@ -1,12 +1,14 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { fetchWithOfflineFallback } from '@/lib/offlineDataCache';
+import { useBranchStore } from '@/store/useBranchStore';
 import {
   Package, AlertTriangle, Download, Edit, Trash2, Plus, Search,
   X, Tag, Truck, Calendar, RefreshCw, ScanBarcode, ChevronDown,
   Boxes, CircleDollarSign, AlertCircle, CheckCircle2, Clock, Loader2,
+  Upload, FileText, CheckCheck, AlertOctagon,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -68,7 +70,7 @@ function KpiCard({ label, value, sub, icon: Icon, color }: {
   return (
     <div
       className="rounded-2xl p-5 flex flex-col gap-3"
-      style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-card)' }}
+      style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}
     >
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>{label}</p>
@@ -102,12 +104,195 @@ function StockBadge({ status }: { status: 'out' | 'low' | 'ok' }) {
   );
 }
 
+// ── CSV Template ──────────────────────────────────────────────────────────────
+const CSV_TEMPLATE_HEADERS = 'name,category,price,cost,stock,low_stock_threshold,barcode,description,expiry_date';
+const CSV_TEMPLATE_EXAMPLE = '"Coca Cola 500ml","Beverages",5.00,3.50,100,10,,Cold carbonated drink,\n"Indomie Noodles","Dry Foods",3.50,2.00,200,20,,,';
+
+function downloadTemplate() {
+  const content = CSV_TEMPLATE_HEADERS + '\n' + CSV_TEMPLATE_EXAMPLE;
+  const blob = new Blob([content], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'products_import_template.csv';
+  a.click();
+}
+
+// ── Import Modal ───────────────────────────────────────────────────────────────
+function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [file,      setFile]      = useState<File | null>(null);
+  const [dragging,  setDragging]  = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [result,    setResult]    = useState<{ imported: number; skipped: number; total: number; errors: { row: number; name: string; error: string }[] } | null>(null);
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault(); setDragging(false);
+    const f = e.dataTransfer.files[0];
+    if (f && f.name.endsWith('.csv')) setFile(f);
+    else toast.error('Please drop a CSV file');
+  };
+
+  const handleImport = async () => {
+    if (!file) return;
+    setImporting(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res  = await fetch('/api/products/import', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error || 'Import failed'); return; }
+      setResult(data);
+      if (data.imported > 0) { toast.success(`${data.imported} product${data.imported !== 1 ? 's' : ''} imported!`); onDone(); }
+    } catch { toast.error('Import failed'); }
+    finally { setImporting(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }} onClick={onClose}>
+      <div className="w-full max-w-lg rounded-2xl overflow-hidden flex flex-col max-h-[90vh]" style={{ background: 'var(--bg-surface)' }} onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 flex-shrink-0" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: '#eff6ff' }}>
+              <Upload className="w-4 h-4" style={{ color: '#3b82f6' }} />
+            </div>
+            <div>
+              <h2 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>Bulk Import Products</h2>
+              <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Upload a CSV file to add multiple products at once</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'var(--bg-surface-2)', color: 'var(--text-secondary)' }}>
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="overflow-y-auto flex-1">
+          <div className="px-6 py-5 space-y-4">
+
+            {/* Template download */}
+            <div className="flex items-center justify-between px-4 py-3 rounded-xl" style={{ background: 'var(--bg-surface-2)' }}>
+              <div>
+                <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Download CSV Template</p>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>
+                  Required columns: <code className="font-mono">name, category, price, cost</code>
+                </p>
+              </div>
+              <button onClick={downloadTemplate} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition-all hover:opacity-80" style={{ background: '#eff6ff', color: '#3b82f6' }}>
+                <Download className="w-3.5 h-3.5" /> Template
+              </button>
+            </div>
+
+            {/* Drop zone */}
+            {!result && (
+              <div
+                onDrop={handleDrop}
+                onDragOver={e => { e.preventDefault(); setDragging(true); }}
+                onDragLeave={() => setDragging(false)}
+                onClick={() => document.getElementById('csv-file-input')?.click()}
+                className="flex flex-col items-center justify-center gap-3 py-10 rounded-2xl border-2 border-dashed cursor-pointer transition-all"
+                style={{
+                  borderColor: dragging ? 'var(--primary-color)' : 'var(--border-default)',
+                  background: dragging ? 'var(--bg-surface-2)' : 'transparent',
+                }}
+              >
+                <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: file ? '#f0fdf4' : 'var(--bg-surface-2)' }}>
+                  {file ? <FileText className="w-6 h-6" style={{ color: '#10b981' }} /> : <Upload className="w-6 h-6" style={{ color: 'var(--text-tertiary)' }} />}
+                </div>
+                {file ? (
+                  <>
+                    <p className="text-sm font-semibold" style={{ color: '#10b981' }}>{file.name}</p>
+                    <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{(file.size / 1024).toFixed(1)} KB · Click to change</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                      {dragging ? 'Drop your CSV here' : 'Drag & drop your CSV file here'}
+                    </p>
+                    <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>or click to browse · CSV files only</p>
+                  </>
+                )}
+                <input id="csv-file-input" type="file" accept=".csv" className="hidden"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) setFile(f); }} />
+              </div>
+            )}
+
+            {/* Result */}
+            {result && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="rounded-xl p-3 text-center" style={{ background: '#f0fdf4' }}>
+                    <p className="text-2xl font-bold" style={{ color: '#15803d' }}>{result.imported}</p>
+                    <p className="text-xs font-medium mt-0.5" style={{ color: '#15803d' }}>Imported</p>
+                  </div>
+                  <div className="rounded-xl p-3 text-center" style={{ background: '#fef9c3' }}>
+                    <p className="text-2xl font-bold" style={{ color: '#854d0e' }}>{result.skipped}</p>
+                    <p className="text-xs font-medium mt-0.5" style={{ color: '#854d0e' }}>Skipped</p>
+                  </div>
+                  <div className="rounded-xl p-3 text-center" style={{ background: 'var(--bg-surface-2)' }}>
+                    <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{result.total}</p>
+                    <p className="text-xs font-medium mt-0.5" style={{ color: 'var(--text-tertiary)' }}>Total rows</p>
+                  </div>
+                </div>
+                {result.errors.length > 0 && (
+                  <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #fecaca' }}>
+                    <div className="flex items-center gap-2 px-3 py-2" style={{ background: '#fef2f2' }}>
+                      <AlertOctagon className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#b91c1c' }} />
+                      <p className="text-xs font-semibold" style={{ color: '#b91c1c' }}>{result.errors.length} row{result.errors.length !== 1 ? 's' : ''} had issues</p>
+                    </div>
+                    <div className="max-h-36 overflow-y-auto divide-y" style={{ borderColor: '#fecaca' }}>
+                      {result.errors.map((e, i) => (
+                        <div key={i} className="px-3 py-2 text-xs flex items-start gap-2">
+                          <span className="font-mono flex-shrink-0" style={{ color: 'var(--text-tertiary)' }}>Row {e.row}</span>
+                          <span className="font-medium truncate" style={{ color: 'var(--text-secondary)' }}>{e.name}</span>
+                          <span className="flex-shrink-0" style={{ color: '#b91c1c' }}>{e.error}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex gap-3 px-6 py-4 flex-shrink-0" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm font-semibold" style={{ background: 'var(--bg-surface-2)', color: 'var(--text-secondary)' }}>
+            {result ? 'Close' : 'Cancel'}
+          </button>
+          {!result && (
+            <button
+              onClick={handleImport}
+              disabled={!file || importing}
+              className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 disabled:opacity-50"
+              style={{ background: '#3b82f6' }}
+            >
+              {importing
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> Importing…</>
+                : <><CheckCheck className="w-4 h-4" /> Import Products</>}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function ProductsPage() {
+  const { selectedBranchId, selectedBranchName } = useBranchStore();
+
   const [products,   setProducts]   = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [suppliers,  setSuppliers]  = useState<Supplier[]>([]);
   const [isModalOpen,   setIsModalOpen]   = useState(false);
+  const [isImportOpen,  setIsImportOpen]  = useState(false);
   const [isLoading,     setIsLoading]     = useState(false);
   const [isFetching,    setIsFetching]    = useState(true);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -124,18 +309,22 @@ export default function ProductsPage() {
   const [formData, setFormData] = useState(emptyForm);
   const fd = (key: keyof typeof emptyForm, v: string) => setFormData(f => ({ ...f, [key]: v }));
 
+  const fetchProducts = useCallback(async () => {
+    try {
+      const branchParam = selectedBranchId ? `&branchId=${selectedBranchId}` : '';
+      const url = `/api/products?_=${Date.now()}${branchParam}`;
+      const res  = await fetch(url);
+      const data = res.ok ? await res.json() : {};
+      setProducts(data.products || []);
+    } catch { toast.error('Failed to load products'); }
+  }, [selectedBranchId]);
+
+  // Re-fetch when branch changes
   useEffect(() => {
+    setIsFetching(true);
     Promise.all([fetchProducts(), fetchCategories(), fetchSuppliers(), fetchExpiringProducts()])
       .finally(() => setIsFetching(false));
-  }, []);
-
-  const fetchProducts = async () => {
-    try {
-      const { data, fromCache } = await fetchWithOfflineFallback('/api/products', 'cached-products');
-      setProducts(data.products || []);
-      if (fromCache) toast('Showing cached products', { icon: '📡', duration: 2000 });
-    } catch { toast.error('Failed to load products'); }
-  };
+  }, [selectedBranchId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchExpiringProducts = async () => {
     try {
@@ -310,8 +499,14 @@ export default function ProductsPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Product Catalog</h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+          <p className="text-sm mt-0.5 flex items-center gap-2 flex-wrap" style={{ color: 'var(--text-secondary)' }}>
             Manage inventory, pricing, and product details
+            {selectedBranchName && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
+                style={{ background: 'var(--brand-100)', color: 'var(--primary-color)' }}>
+                · {selectedBranchName}
+              </span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -324,9 +519,16 @@ export default function ProductsPage() {
             <RefreshCw className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
           </button>
           <button
+            onClick={() => setIsImportOpen(true)}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all hover:opacity-90"
+            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', color: 'var(--text-secondary)' }}
+          >
+            <Upload className="w-4 h-4" /> Import CSV
+          </button>
+          <button
             onClick={() => setIsModalOpen(true)}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
-            style={{ background: 'var(--primary-color)', boxShadow: '0 2px 8px var(--primary-color)44' }}
+            style={{ background: 'var(--primary-color)' }}
           >
             <Plus className="w-4 h-4" /> Add Product
           </button>
@@ -344,7 +546,7 @@ export default function ProductsPage() {
       {/* ── Filters bar ── */}
       <div
         className="rounded-2xl px-4 py-3.5 flex flex-col sm:flex-row gap-3"
-        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-card)' }}
+        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}
       >
         {/* Search */}
         <div className="relative flex-1">
@@ -409,7 +611,7 @@ export default function ProductsPage() {
       {/* ── Products Table ── */}
       <div
         className="rounded-2xl overflow-hidden"
-        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-card)' }}
+        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}
       >
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -636,6 +838,14 @@ export default function ProductsPage() {
         )}
       </div>
 
+      {/* ── Import Modal ── */}
+      {isImportOpen && (
+        <ImportModal
+          onClose={() => setIsImportOpen(false)}
+          onDone={() => { fetchProducts(); fetchExpiringProducts(); }}
+        />
+      )}
+
       {/* ── Add / Edit Modal ── */}
       {isModalOpen && (
         <div
@@ -644,7 +854,7 @@ export default function ProductsPage() {
         >
           <div
             className="w-full max-w-xl max-h-[90vh] flex flex-col rounded-2xl overflow-hidden"
-            style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-floating)' }}
+            style={{ background: 'var(--bg-surface)' }}
           >
             {/* Modal header */}
             <div className="flex items-center justify-between px-6 py-4 flex-shrink-0" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
@@ -833,7 +1043,7 @@ export default function ProductsPage() {
         <div className="fixed bottom-6 right-6 z-50 w-80">
           <div
             className="rounded-2xl overflow-hidden"
-            style={{ background: 'var(--bg-surface)', border: '1px solid #fca5a5', boxShadow: 'var(--shadow-elevated)' }}
+            style={{ background: 'var(--bg-surface)', border: '1px solid #fca5a5' }}
           >
             <div className="flex items-center justify-between px-4 py-3" style={{ background: '#fef2f2', borderBottom: '1px solid #fecaca' }}>
               <div className="flex items-center gap-2">

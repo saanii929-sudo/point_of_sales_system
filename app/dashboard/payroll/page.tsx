@@ -109,7 +109,7 @@ function KpiCard({
   return (
     <div
       className="rounded-2xl p-5 flex flex-col gap-3"
-      style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-card)' }}
+      style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}
     >
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>{label}</p>
@@ -282,7 +282,7 @@ export default function PayrollPage() {
         <button
           onClick={() => setIsModalOpen(true)}
           className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
-          style={{ background: 'var(--primary-color)', boxShadow: '0 2px 8px var(--primary-color)44' }}
+          style={{ background: 'var(--primary-color)' }}
         >
           <Plus className="w-4 h-4" />
           Generate Payroll
@@ -300,7 +300,7 @@ export default function PayrollPage() {
       {/* ── Filters ── */}
       <div
         className="rounded-2xl p-4"
-        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-card)' }}
+        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}
       >
         <div className="flex flex-wrap items-end gap-3">
           {/* Status pills */}
@@ -392,7 +392,7 @@ export default function PayrollPage() {
               <div
                 key={payroll._id}
                 className="rounded-2xl overflow-hidden transition-all"
-                style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-card)' }}
+                style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}
               >
                 {/* Row header */}
                 <div className="flex items-center gap-4 p-4 sm:p-5">
@@ -575,7 +575,7 @@ export default function PayrollPage() {
         <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto" style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}>
           <div
             className="w-full max-w-2xl my-8 rounded-2xl overflow-hidden"
-            style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-floating)' }}
+            style={{ background: 'var(--bg-surface)' }}
           >
             {/* Modal header */}
             <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid var(--border-subtle)' }}>

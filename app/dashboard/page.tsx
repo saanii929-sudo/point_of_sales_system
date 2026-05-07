@@ -1,28 +1,33 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { BusinessHealthIndicator } from '@/components/dashboard/BusinessHealthIndicator';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useBranchStore } from '@/store/useBranchStore';
 import toast from 'react-hot-toast';
 import { fetchWithOfflineFallback } from '@/lib/offlineDataCache';
+import Link from 'next/link';
 import {
   AlertTriangle, TrendingUp, DollarSign, ShoppingCart, Users,
   RefreshCw, Pause, Play, Package, ArrowUpRight, ArrowDownRight,
-  ExternalLink,
+  ExternalLink, Target, ChevronRight, UserCircle,
+  Zap, X, Edit2, Check,
 } from 'lucide-react';
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
-import Link from 'next/link';
 
 // ── Types ──────────────────────────────────────────────────
 interface DashboardData {
   summary: {
-    totalSales:     number;
-    totalProfit:    number;
-    salesCount:     number;
-    totalCustomers: number;
+    totalSales:       number;
+    totalProfit:      number;
+    salesCount:       number;
+    totalCustomers:   number;
+    salesChange:      number;
+    profitChange:     number;
+    salesCountChange: number;
   };
   topProducts:      Array<{ name: string; quantity: number; revenue: number }>;
   lowStockProducts: Array<{ name: string; stock: number; lowStockThreshold: number }>;
@@ -40,6 +45,27 @@ const MEDAL_STYLES = [
   { bg: '#f8fafc', border: '#e2e8f0', barColor: '#94a3b8' },
   { bg: '#fff7ed', border: '#fed7aa', barColor: '#f97316' },
 ];
+
+// ── Animated counter hook ──────────────────────────────────
+function useAnimatedValue(target: number, duration = 1200) {
+  const [val, setVal] = useState(0);
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (mounted.current) return; // only animate once
+    mounted.current = true;
+    if (target === 0) return;
+    let start = 0;
+    const steps = Math.ceil(duration / 16);
+    const inc = target / steps;
+    const id = setInterval(() => {
+      start += inc;
+      if (start >= target) { setVal(target); clearInterval(id); }
+      else setVal(start);
+    }, 16);
+    return () => clearInterval(id);
+  }, [target, duration]);
+  return val;
+}
 
 // ── Greeting ───────────────────────────────────────────────
 function getGreeting() {
@@ -77,7 +103,6 @@ const ChartTooltip = ({ active, payload, label }: any) => {
       border: '1px solid var(--border-default)',
       borderRadius: 12,
       padding: '10px 14px',
-      boxShadow: 'var(--shadow-elevated)',
       fontSize: 12,
     }}>
       <p style={{ color: 'var(--text-tertiary)', fontWeight: 600, marginBottom: 6, fontSize: 11 }}>{label}</p>
@@ -109,7 +134,6 @@ function SectionCard({
       background: 'var(--bg-surface)',
       border: '1px solid var(--border-subtle)',
       borderRadius: 20,
-      boxShadow: 'var(--shadow-card)',
       overflow: 'hidden',
     }}>
       {(title || action) && (
@@ -135,26 +159,36 @@ function SectionCard({
   );
 }
 
-// ── KPI Card ───────────────────────────────────────────────
+// ── KPI Card with animated counter ────────────────────────
 function KpiCard({
-  title, value, change, up, icon, iconBg, iconColor,
+  title, value, rawValue, change, up, icon, iconBg, iconColor, prefix = '', suffix = '',
 }: {
   title: string;
   value: string;
+  rawValue?: number;
   change: string;
   up: boolean;
   icon: React.ReactNode;
   iconBg: string;
   iconColor: string;
+  prefix?: string;
+  suffix?: string;
 }) {
+  const animated = useAnimatedValue(rawValue ?? 0);
+  const displayValue = rawValue !== undefined
+    ? `${prefix}${animated.toLocaleString('en-US', { minimumFractionDigits: rawValue % 1 !== 0 ? 2 : 0, maximumFractionDigits: 2 })}${suffix}`
+    : value;
+
   return (
     <div style={{
       background: 'var(--bg-surface)',
       border: '1px solid var(--border-subtle)',
       borderRadius: 20,
       padding: 20,
-      boxShadow: 'var(--shadow-card)',
-    }}>
+      transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+    }}
+    className="hover:-translate-y-0.5"
+    >
       <div className="flex items-start justify-between mb-3">
         <div style={{
           width: 44, height: 44, borderRadius: 12,
@@ -174,7 +208,249 @@ function KpiCard({
         </span>
       </div>
       <p style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 4 }}>{title}</p>
-      <p style={{ fontSize: 22, fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', lineHeight: 1 }}>{value}</p>
+      <p style={{ fontSize: 22, fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', lineHeight: 1 }}>{displayValue}</p>
+    </div>
+  );
+}
+
+// ── Goals widget ───────────────────────────────────────────
+const GOAL_KEY = 'sv_daily_goal';
+
+function GoalsWidget({ todayRevenue }: { todayRevenue: number }) {
+  const [goal, setGoal] = useState<number>(0);
+  const [editing, setEditing] = useState(false);
+  const [inputVal, setInputVal] = useState('');
+  const animated = useAnimatedValue(todayRevenue);
+
+  useEffect(() => {
+    const saved = localStorage.getItem(GOAL_KEY);
+    if (saved) setGoal(Number(saved));
+  }, []);
+
+  const pct = goal > 0 ? Math.min((todayRevenue / goal) * 100, 100) : 0;
+  const color = pct < 25 ? '#ef4444' : pct < 75 ? '#f59e0b' : '#10b981';
+  const msg   = pct === 0 ? 'Set a daily goal to track progress' :
+                pct < 25  ? "Let's get started! You can do it." :
+                pct < 75  ? 'Great progress, keep pushing!' :
+                pct < 100 ? "Almost there! Push a little harder!" :
+                            'Goal crushed! 🎉';
+
+  const saveGoal = () => {
+    const v = parseFloat(inputVal);
+    if (!isNaN(v) && v > 0) {
+      setGoal(v);
+      localStorage.setItem(GOAL_KEY, String(v));
+    }
+    setEditing(false);
+  };
+
+  return (
+    <div style={{
+      background: 'var(--bg-surface)',
+      border: '1px solid var(--border-subtle)',
+      borderRadius: 20, padding: 20,
+    }}>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: '#ecfdf5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Target style={{ width: 18, height: 18, color: '#059669' }} />
+          </div>
+          <div>
+            <p style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)', margin: 0 }}>Daily Goal</p>
+            {editing ? (
+              <div className="flex items-center gap-1 mt-0.5">
+                <input
+                  type="number"
+                  value={inputVal}
+                  onChange={e => setInputVal(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && saveGoal()}
+                  placeholder="Set target..."
+                  autoFocus
+                  className="input-base"
+                  style={{ width: 110, height: 26, fontSize: 12, padding: '2px 8px' }}
+                />
+                <button onClick={saveGoal} style={{ color: '#10b981' }}>
+                  <Check style={{ width: 14, height: 14 }} />
+                </button>
+              </div>
+            ) : (
+              <p style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)', margin: 0, lineHeight: 1 }}>
+                {goal > 0 ? `GH₵${goal.toLocaleString()}` : '—'}
+              </p>
+            )}
+          </div>
+        </div>
+        <button
+          onClick={() => { setEditing(true); setInputVal(goal > 0 ? String(goal) : ''); }}
+          style={{ color: 'var(--text-tertiary)' }}
+          className="hover:text-[var(--text-primary)] transition-colors"
+          title="Edit goal"
+        >
+          <Edit2 style={{ width: 14, height: 14 }} />
+        </button>
+      </div>
+
+      {goal > 0 && (
+        <>
+          <div style={{ position: 'relative', height: 6, background: 'var(--bg-surface-3)', borderRadius: 99, overflow: 'hidden', marginBottom: 8 }}>
+            <div style={{
+              position: 'absolute', left: 0, top: 0, height: '100%',
+              width: `${pct}%`,
+              background: color,
+              borderRadius: 99,
+              transition: 'width 1s ease',
+            }} />
+          </div>
+          <div className="flex items-center justify-between">
+            <p style={{ fontSize: 11, color: 'var(--text-tertiary)', margin: 0 }}>{msg}</p>
+            <p style={{ fontSize: 11, fontWeight: 700, color, margin: 0 }}>
+              GH₵{animated.toLocaleString('en-US', { maximumFractionDigits: 0 })} / {pct.toFixed(0)}%
+            </p>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Recent Activity feed ───────────────────────────────────
+interface RecentSale {
+  _id: string;
+  saleNumber: string;
+  total: number;
+  cashier?: { name?: string };
+  createdAt: string;
+}
+
+function RecentActivityFeed({ branchId }: { branchId?: string | null }) {
+  const [sales, setSales] = useState<RecentSale[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    const branchParam = branchId ? `&branchId=${branchId}` : '';
+    fetch(`/api/sales?limit=5${branchParam}`)
+      .then(r => r.ok ? r.json() : { sales: [] })
+      .then(d => setSales((d.sales || []).slice(0, 5)))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [branchId]);
+
+  const timeAgo = (iso: string) => {
+    const diffMs = Date.now() - new Date(iso).getTime();
+    const m = Math.floor(diffMs / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return `${m} min ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    return `${Math.floor(h / 24)}d ago`;
+  };
+
+  return (
+    <div style={{
+      background: 'var(--bg-surface)',
+      border: '1px solid var(--border-subtle)',
+      borderRadius: 20,
+      overflow: 'hidden',
+    }}>
+      <div style={{ padding: '18px 20px', borderBottom: '1px solid var(--border-subtle)' }} className="flex items-center justify-between">
+        <div>
+          <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Recent Activity</p>
+          <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 2 }}>Last 5 transactions</p>
+        </div>
+        <Link href="/dashboard/sales" style={{ fontSize: 12, fontWeight: 600, color: '#10b981', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+          View all <ChevronRight style={{ width: 12, height: 12 }} />
+        </Link>
+      </div>
+      <div>
+        {loading ? (
+          Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3 animate-pulse" style={{ padding: '12px 20px', borderBottom: '1px solid var(--border-subtle)' }}>
+              <div style={{ width: 32, height: 32, borderRadius: 10, background: 'var(--bg-surface-2)' }} />
+              <div className="flex-1">
+                <div style={{ height: 11, width: '60%', background: 'var(--bg-surface-2)', borderRadius: 6, marginBottom: 4 }} />
+                <div style={{ height: 10, width: '40%', background: 'var(--bg-surface-3)', borderRadius: 6 }} />
+              </div>
+            </div>
+          ))
+        ) : sales.length === 0 ? (
+          <div style={{ padding: '32px 20px', textAlign: 'center' }}>
+            <ShoppingCart style={{ width: 28, height: 28, color: 'var(--text-tertiary)', margin: '0 auto 8px' }} />
+            <p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>No sales yet today</p>
+          </div>
+        ) : (
+          sales.map((sale, i) => (
+            <div key={sale._id} className="flex items-center gap-3 hover:bg-[var(--bg-surface-2)] transition-colors" style={{
+              padding: '10px 20px',
+              borderBottom: i < sales.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+            }}>
+              <div style={{ width: 32, height: 32, borderRadius: 10, background: '#ecfdf5', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <UserCircle style={{ width: 16, height: 16, color: '#059669' }} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', margin: 0 }} className="truncate">
+                  {sale.cashier?.name || 'Cashier'} sold{' '}
+                  <span style={{ color: '#059669', fontWeight: 700 }}>GH₵{sale.total.toFixed(2)}</span>
+                </p>
+                <p style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                  #{sale.saleNumber} · {timeAgo(sale.createdAt)}
+                </p>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Quick Actions FAB ──────────────────────────────────────
+function QuickActionsFAB() {
+  const [open, setOpen] = useState(false);
+  const actions = [
+    { label: 'New Sale',      href: '/dashboard/pos',       color: '#10b981', icon: ShoppingCart },
+    { label: 'Add Product',   href: '/dashboard/products',  color: '#3b82f6', icon: Package },
+    { label: 'Add Customer',  href: '/dashboard/customers', color: '#8b5cf6', icon: Users },
+    { label: 'View Reports',  href: '/dashboard/reports',   color: '#f59e0b', icon: TrendingUp },
+  ];
+
+  return (
+    <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-2">
+      {open && (
+        <>
+          <div className="fixed inset-0 z-[-1]" onClick={() => setOpen(false)} />
+          {actions.map((a, i) => {
+            const Icon = a.icon;
+            return (
+              <Link
+                key={a.label}
+                href={a.href}
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl hover:-translate-y-0.5 transition-all animate-fade-in-up"
+                style={{
+                  background: 'var(--bg-surface)',
+                  border: '1px solid var(--border-subtle)',
+                  animationDelay: `${i * 50}ms`,
+                  textDecoration: 'none',
+                }}
+              >
+                <div style={{ width: 28, height: 28, borderRadius: 8, background: `${a.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon style={{ width: 14, height: 14, color: a.color }} />
+                </div>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{a.label}</span>
+              </Link>
+            );
+          })}
+        </>
+      )}
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-12 h-12 rounded-full flex items-center justify-center transition-all hover:-translate-y-0.5 active:scale-95"
+        style={{ background: 'linear-gradient(135deg, #10b981, #059669)', color: '#fff' }}
+        title="Quick Actions"
+      >
+        {open ? <X style={{ width: 20, height: 20 }} /> : <Zap style={{ width: 20, height: 20 }} />}
+      </button>
     </div>
   );
 }
@@ -182,6 +458,7 @@ function KpiCard({
 // ── Main component ─────────────────────────────────────────
 export default function DashboardPage() {
   const { user } = useAuthStore();
+  const { selectedBranchId, selectedBranchName } = useBranchStore();
   const [data,               setData]               = useState<DashboardData | null>(null);
   const [isLoading,          setIsLoading]          = useState(true);
   const [period,             setPeriod]             = useState('today');
@@ -192,15 +469,19 @@ export default function DashboardPage() {
 
   const fetchOutOfStockProducts = useCallback(async () => {
     try {
-      const { data: result } = await fetchWithOfflineFallback('/api/products');
-      setOutOfStockProducts((result.products || []).filter((p: Product) => p.stock <= 0));
+      const branchParam = selectedBranchId ? `?branchId=${selectedBranchId}` : '';
+      const { data: result } = await fetchWithOfflineFallback(`/api/products${branchParam}`);
+      setOutOfStockProducts(
+        (result.products || []).filter((p: any) => (p.branchStock ?? p.stock) <= 0)
+      );
     } catch { /* silent */ }
-  }, []);
+  }, [selectedBranchId]);
 
   const fetchDashboardData = useCallback(async (silent = false) => {
     try {
       if (!silent) setIsLoading(true);
-      const url = `/api/analytics/dashboard?period=${period}`;
+      const branchParam = selectedBranchId ? `&branchId=${selectedBranchId}` : '';
+      const url = `/api/analytics/dashboard?period=${period}${branchParam}`;
       const { data: result, fromCache } = await fetchWithOfflineFallback(url);
 
       const hasChanged = data && (
@@ -226,12 +507,12 @@ export default function DashboardPage() {
     } finally {
       if (!silent) setIsLoading(false);
     }
-  }, [period, data]);
+  }, [period, data, selectedBranchId]);
 
   useEffect(() => {
     fetchDashboardData();
     fetchOutOfStockProducts();
-  }, [period]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [period, selectedBranchId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Real-time polling every 30s
   useEffect(() => {
@@ -241,7 +522,7 @@ export default function DashboardPage() {
       fetchOutOfStockProducts();
     }, 30_000);
     return () => clearInterval(id);
-  }, [period, isRealTime]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [period, isRealTime, selectedBranchId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Loading skeleton ───────────────────────────────────
   if (isLoading) {
@@ -282,18 +563,25 @@ export default function DashboardPage() {
 
   const maxRevenue = Math.max(...data.topProducts.map(p => p.revenue), 1);
 
+  const fmtChange = (pct: number) => `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
+
   const kpiCards = [
     {
       title: 'Total Revenue',
       value: `GH₵${data.summary.totalSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-      change: '+12.5%', up: true,
+      rawValue: data.summary.totalSales,
+      prefix: 'GH₵',
+      change: fmtChange(data.summary.salesChange),
+      up: data.summary.salesChange >= 0,
       icon: <DollarSign style={{ width: 20, height: 20 }} />,
       iconBg: '#ecfdf5', iconColor: '#059669',
     },
     {
       title: 'Net Profit',
       value: `GH₵${data.summary.totalProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-      change: data.summary.totalProfit >= 0 ? 'Positive' : 'Below cost',
+      rawValue: data.summary.totalProfit,
+      prefix: 'GH₵',
+      change: data.summary.totalProfit >= 0 ? fmtChange(data.summary.profitChange) : 'Below cost',
       up: data.summary.totalProfit >= 0,
       icon: <TrendingUp style={{ width: 20, height: 20 }} />,
       iconBg: data.summary.totalProfit >= 0 ? '#eff6ff' : '#fef2f2',
@@ -302,21 +590,25 @@ export default function DashboardPage() {
     {
       title: 'Transactions',
       value: data.summary.salesCount.toLocaleString(),
-      change: '+5.3%', up: true,
+      rawValue: data.summary.salesCount,
+      change: fmtChange(data.summary.salesCountChange),
+      up: data.summary.salesCountChange >= 0,
       icon: <ShoppingCart style={{ width: 20, height: 20 }} />,
       iconBg: '#f5f3ff', iconColor: '#7c3aed',
     },
     {
       title: 'Customers',
       value: data.summary.totalCustomers.toLocaleString(),
-      change: '+2.8%', up: true,
+      rawValue: data.summary.totalCustomers,
+      change: '+0.0%',
+      up: true,
       icon: <Users style={{ width: 20, height: 20 }} />,
       iconBg: '#fffbeb', iconColor: '#d97706',
     },
   ];
 
   return (
-    <div className="space-y-6 animate-fade-in relative pb-10">
+    <div className="space-y-6 animate-fade-in relative pb-16">
 
       {/* ── Out of stock alert ── */}
       {outOfStockProducts.length > 0 && !outOfStockDismissed && (
@@ -324,7 +616,6 @@ export default function DashboardPage() {
           <div style={{
             background: '#dc2626', color: '#fff',
             borderRadius: 20, padding: 16,
-            boxShadow: '0 20px 60px rgba(220,38,38,0.35)',
             border: '1px solid rgba(255,255,255,0.15)',
           }}>
             <div className="flex items-start gap-3">
@@ -378,6 +669,47 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* ── Today at a Glance bar ── */}
+      {period === 'today' && (
+        <div style={{
+          background: 'linear-gradient(135deg, var(--brand-50), var(--brand-100))',
+          border: '1px solid var(--border-brand)',
+          borderRadius: 16,
+          padding: '14px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+          flexWrap: 'wrap',
+        }}>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981' }} className="animate-pulse" />
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>
+              {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          </div>
+          <div className="h-4 w-px bg-[var(--border-default)]" />
+          <div className="flex items-center gap-1.5">
+            <ShoppingCart style={{ width: 14, height: 14, color: '#059669' }} />
+            <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+              <strong style={{ color: 'var(--text-primary)', fontWeight: 700 }}>{data.summary.salesCount}</strong> sales today
+            </span>
+          </div>
+          <div className="h-4 w-px bg-[var(--border-default)] hidden sm:block" />
+          <div className="flex items-center gap-1.5">
+            <DollarSign style={{ width: 14, height: 14, color: '#059669' }} />
+            <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+              <strong style={{ color: 'var(--text-primary)', fontWeight: 700 }}>
+                GH₵{data.summary.totalSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </strong> revenue
+            </span>
+          </div>
+          <div className="flex-1" />
+          <span style={{ fontSize: 12, fontWeight: 600, color: data.summary.salesChange >= 0 ? '#059669' : '#dc2626' }}>
+            {data.summary.salesChange >= 0 ? '↑' : '↓'} {Math.abs(data.summary.salesChange).toFixed(1)}% vs yesterday
+          </span>
+        </div>
+      )}
+
       {/* ── Page header ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -402,6 +734,13 @@ export default function DashboardPage() {
             Here&apos;s what&apos;s happening with your business
             {isRealTime ? ` · Live · Updated ${lastUpdate.toLocaleTimeString()}` : ''}
           </p>
+          {selectedBranchName && (
+            <span className="inline-flex items-center gap-1.5 mt-2 px-3 py-1 rounded-full text-xs font-semibold"
+              style={{ background: 'var(--brand-100)', color: 'var(--primary-color)', border: '1px solid var(--brand-100)' }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--primary-color)', display: 'inline-block' }} />
+              Viewing: {selectedBranchName}
+            </span>
+          )}
         </div>
 
         {/* Controls */}
@@ -464,6 +803,29 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* ── Quick Actions Row ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: 'New Sale',     href: '/dashboard/pos',       color: '#10b981', bg: '#ecfdf5', icon: ShoppingCart },
+          { label: 'Add Product',  href: '/dashboard/products',  color: '#3b82f6', bg: '#eff6ff', icon: Package },
+          { label: 'Add Customer', href: '/dashboard/customers', color: '#8b5cf6', bg: '#f5f3ff', icon: Users },
+          { label: 'View Reports', href: '/dashboard/reports',   color: '#f59e0b', bg: '#fffbeb', icon: TrendingUp },
+        ].map(a => {
+          const Icon = a.icon;
+          return (
+            <Link key={a.href} href={a.href}
+              className="flex items-center gap-3 px-4 py-3 rounded-2xl transition-all hover:-translate-y-0.5"
+              style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', textDecoration: 'none'}}
+            >
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: a.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Icon style={{ width: 16, height: 16, color: a.color }} />
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }} className="truncate">{a.label}</span>
+            </Link>
+          );
+        })}
+      </div>
+
       {/* ── KPI Cards ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {kpiCards.map((kpi, i) => (
@@ -471,6 +833,66 @@ export default function DashboardPage() {
         ))}
         <BusinessHealthIndicator />
       </div>
+
+      {/* ── Goals + Recent Activity row ── */}
+      <div className="grid lg:grid-cols-3 gap-5">
+        <GoalsWidget todayRevenue={data.summary.totalSales} />
+        <div className="lg:col-span-2">
+          <RecentActivityFeed branchId={selectedBranchId} />
+        </div>
+      </div>
+
+      {/* ── Quick Actions FAB ── */}
+      <QuickActionsFAB />
+
+      {/* ── Upcoming Alerts ── */}
+      {(data.lowStockProducts.length > 0 || outOfStockProducts.length > 0) && (
+        <div style={{
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--border-subtle)',
+          borderRadius: 20,
+          overflow: 'hidden',
+        }}>
+          <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--border-subtle)' }} className="flex items-center justify-between">
+            <div>
+              <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Upcoming Alerts</h3>
+              <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 2 }}>Items that need your attention</p>
+            </div>
+            <Link href="/dashboard/inventory" style={{ fontSize: 12, fontWeight: 600, color: '#10b981', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+              View all <ChevronRight style={{ width: 12, height: 12 }} />
+            </Link>
+          </div>
+          <div className="grid sm:grid-cols-3 gap-0 divide-y sm:divide-y-0 sm:divide-x" style={{ borderColor: 'var(--border-subtle)' }}>
+            <Link href="/dashboard/inventory" className="flex items-center gap-3 p-5 hover:bg-[var(--bg-surface-2)] transition-colors" style={{ textDecoration: 'none' }}>
+              <div style={{ width: 40, height: 40, borderRadius: 12, background: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <AlertTriangle style={{ width: 18, height: 18, color: '#dc2626' }} />
+              </div>
+              <div>
+                <p style={{ fontSize: 20, fontWeight: 800, color: '#dc2626', lineHeight: 1, margin: 0 }}>{outOfStockProducts.length}</p>
+                <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>Out of stock</p>
+              </div>
+            </Link>
+            <Link href="/dashboard/inventory" className="flex items-center gap-3 p-5 hover:bg-[var(--bg-surface-2)] transition-colors" style={{ textDecoration: 'none' }}>
+              <div style={{ width: 40, height: 40, borderRadius: 12, background: '#fffbeb', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Package style={{ width: 18, height: 18, color: '#d97706' }} />
+              </div>
+              <div>
+                <p style={{ fontSize: 20, fontWeight: 800, color: '#d97706', lineHeight: 1, margin: 0 }}>{data.lowStockProducts.length}</p>
+                <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>Low stock items</p>
+              </div>
+            </Link>
+            <Link href="/dashboard/expiring" className="flex items-center gap-3 p-5 hover:bg-[var(--bg-surface-2)] transition-colors" style={{ textDecoration: 'none' }}>
+              <div style={{ width: 40, height: 40, borderRadius: 12, background: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <ExternalLink style={{ width: 18, height: 18, color: '#3b82f6' }} />
+              </div>
+              <div>
+                <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>Expiring Soon</p>
+                <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>View expiring products</p>
+              </div>
+            </Link>
+          </div>
+        </div>
+      )}
 
       {/* ── Charts row 1 ── */}
       <div className="grid lg:grid-cols-2 gap-5">

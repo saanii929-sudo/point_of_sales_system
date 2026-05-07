@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/db';
 import { getSession, hashPassword } from '@/lib/auth';
 import User from '@/models/User';
+import { logActivity } from '@/lib/logActivity';
 
 export async function GET() {
   try {
@@ -47,11 +48,19 @@ export async function POST(req: NextRequest) {
     await connectDB();
 
     const body = await req.json();
-    const { name, email, password, role, phone } = body;
+    const { name, email, password, role, phone, branchId } = body;
 
     if (!name || !email || !password || !role) {
       return NextResponse.json(
         { error: 'Missing required fields' },
+        { status: 400 }
+      );
+    }
+
+    // Branch required for non-owner roles
+    if (['cashier', 'manager', 'inventory_staff'].includes(role) && !branchId) {
+      return NextResponse.json(
+        { error: 'A branch must be assigned for this role' },
         { status: 400 }
       );
     }
@@ -73,7 +82,17 @@ export async function POST(req: NextRequest) {
       email,
       password: hashedPassword,
       role,
-      phone
+      phone,
+      branchId: branchId || undefined,
+    });
+
+    logActivity({
+      tenantId: session.tenantId,
+      userId:   session.userId,
+      action:   'create_employee',
+      entity:   'User',
+      entityId: employee._id.toString(),
+      details:  { name: employee.name, role: employee.role, email: employee.email },
     });
 
     return NextResponse.json({
@@ -81,7 +100,8 @@ export async function POST(req: NextRequest) {
         id: employee._id,
         name: employee.name,
         email: employee.email,
-        role: employee.role
+        role: employee.role,
+        branchId: employee.branchId?.toString() || null,
       }
     }, { status: 201 });
   } catch (error: any) {

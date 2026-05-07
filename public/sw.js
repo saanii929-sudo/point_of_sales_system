@@ -218,4 +218,9 @@ async function prefetchApiData(urls) {
       console.warn(`[SW] API prefetch failed for ${url}`);
     }
   }
+  // Notify clients that API prefetch is done (same signal as page prefetch)
+  const clients = await self.clients.matchAll();
+  clients.forEach((client) => {
+    client.postMessage({ type: 'PREFETCH_COMPLETE' });
+  });
 }

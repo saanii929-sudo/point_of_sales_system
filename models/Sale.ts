@@ -11,6 +11,7 @@ export interface ISaleItem {
 
 export interface ISale extends Document {
   tenantId: mongoose.Types.ObjectId;
+  branchId?: mongoose.Types.ObjectId;
   saleNumber: string;
   items: ISaleItem[];
   subtotal: number;
@@ -35,6 +36,7 @@ export interface ISale extends Document {
 
 const SaleSchema = new Schema<ISale>({
   tenantId: { type: Schema.Types.ObjectId, ref: 'Business', required: true },
+  branchId: { type: Schema.Types.ObjectId, ref: 'Branch', required: false },
   saleNumber: { type: String, required: true, unique: true },
   items: [{
     product: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
@@ -71,6 +73,7 @@ const SaleSchema = new Schema<ISale>({
 }, { timestamps: true });
 
 SaleSchema.index({ tenantId: 1, createdAt: -1 });
+SaleSchema.index({ tenantId: 1, branchId: 1 });
 SaleSchema.index({ tenantId: 1, cashier: 1 });
 SaleSchema.index({ tenantId: 1, customer: 1 });
 

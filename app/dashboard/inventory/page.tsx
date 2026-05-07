@@ -1,16 +1,18 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { fetchWithOfflineFallback } from '@/lib/offlineDataCache';
+import { useBranchStore } from '@/store/useBranchStore';
 import {
-  TrendingUp, Package, AlertTriangle, RefreshCw,
-  Zap, BrainCircuit, BarChart3, ShoppingCart,
-  CircleDollarSign, Clock, ArrowUp, CheckCircle2,
+  TrendingUp, RefreshCw,
+  Zap, BrainCircuit, BarChart3,
+  CircleDollarSign, CheckCircle2,
   Boxes, ChevronRight, Flame, Ban,
+  Search, X, Plus, Minus, Loader2, Edit, Package,
+  AlertTriangle as AlertTriangleIcon,
 } from 'lucide-react';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 interface InventoryInsights {
   fastMoving: Array<{ id: string; name: string; quantity: number; revenue: number }>;
   deadStock:  Array<{ id: string; name: string; stock: number; value: number }>;
@@ -67,7 +69,7 @@ function KpiCard({ label, value, prefix = '', sub, icon: Icon, color }: {
   return (
     <div
       className="rounded-2xl p-5 flex flex-col gap-3"
-      style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-card)' }}
+      style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}
     >
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>{label}</p>
@@ -93,7 +95,7 @@ function SectionCard({ icon: Icon, iconColor, title, subtitle, count, countColor
   return (
     <div
       className="rounded-2xl overflow-hidden"
-      style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-card)' }}
+      style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}
     >
       {/* Header */}
       <div
@@ -169,20 +171,206 @@ function SkeletonRow() {
   );
 }
 
+// ─── Stock Product type ───────────────────────────────────────────────────────
+interface StockProduct {
+  _id: string;
+  name: string;
+  sku: string;
+  stock: number;
+  lowStockThreshold: number;
+  cost: number;
+  category?: { name: string; color: string };
+  supplier?: { name: string };
+}
+
+// ─── Stock Adjustment Modal ───────────────────────────────────────────────────
+function AdjustModal({ product, onClose, onSave }: {
+  product: StockProduct;
+  onClose: () => void;
+  onSave: (id: string, newStock: number, reason: string) => Promise<void>;
+}) {
+  const [mode, setMode]     = useState<'add' | 'remove' | 'set'>('add');
+  const [qty, setQty]       = useState(0);
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  const newStock = mode === 'add' ? product.stock + qty : mode === 'remove' ? Math.max(0, product.stock - qty) : qty;
+  const diff = newStock - product.stock;
+
+  const handleSave = async () => {
+    if (!reason) { toast.error('Please select a reason.'); return; }
+    setSaving(true);
+    try { await onSave(product._id, newStock, reason); }
+    finally { setSaving(false); }
+  };
+
+  const reasons = mode === 'add'
+    ? ['Restock', 'Return to inventory', 'Correction', 'Transfer in']
+    : mode === 'remove'
+    ? ['Damaged', 'Theft', 'Expired', 'Transfer out', 'Correction']
+    : ['Correction', 'Stock count'];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}>
+      <div className="w-full max-w-md rounded-2xl overflow-hidden" style={{ background: 'var(--bg-surface)' }}>
+        <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: '#3b82f622' }}>
+              <Edit className="w-4 h-4" style={{ color: '#3b82f6' }} />
+            </div>
+            <div>
+              <h2 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>Adjust Stock</h2>
+              <p className="text-xs truncate max-w-[200px]" style={{ color: 'var(--text-tertiary)' }}>{product.name}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'var(--bg-surface-2)', color: 'var(--text-secondary)' }}>
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          {/* Current stock display */}
+          <div className="rounded-xl px-4 py-3 flex items-center justify-between" style={{ background: 'var(--bg-surface-2)' }}>
+            <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>Current stock</span>
+            <span className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{product.stock} units</span>
+          </div>
+
+          {/* Mode selector */}
+          <div>
+            <p className="text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>Adjustment type</p>
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                { key: 'add',    label: '+ Add',      color: '#10b981' },
+                { key: 'remove', label: '- Remove',   color: '#ef4444' },
+                { key: 'set',    label: '= Set exact', color: '#3b82f6' },
+              ] as const).map(m => (
+                <button key={m.key} onClick={() => { setMode(m.key); setQty(0); setReason(''); }}
+                  className="py-2.5 rounded-xl text-xs font-bold transition-all"
+                  style={mode === m.key ? { background: m.color, color: '#fff' } : { background: 'var(--bg-surface-2)', color: 'var(--text-secondary)' }}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Quantity */}
+          <div>
+            <p className="text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
+              {mode === 'set' ? 'New stock count' : 'Quantity'}
+            </p>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setQty(q => Math.max(0, q - 1))} className="w-10 h-10 rounded-xl flex items-center justify-center transition-all hover:opacity-80" style={{ background: 'var(--bg-surface-2)', color: 'var(--text-secondary)' }}>
+                <Minus className="w-4 h-4" />
+              </button>
+              <input type="number" min="0" value={qty} onChange={e => setQty(Math.max(0, Number(e.target.value)))}
+                className="flex-1 text-center text-lg font-bold py-2 rounded-xl border outline-none transition-all"
+                style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-default)', color: 'var(--text-primary)' }} />
+              <button onClick={() => setQty(q => q + 1)} className="w-10 h-10 rounded-xl flex items-center justify-center transition-all hover:opacity-80" style={{ background: 'var(--bg-surface-2)', color: 'var(--text-secondary)' }}>
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* New stock preview */}
+          {qty > 0 && (
+            <div className="rounded-xl px-4 py-3 flex items-center justify-between" style={{ background: diff > 0 ? '#dcfce7' : diff < 0 ? '#fef2f2' : 'var(--bg-surface-2)' }}>
+              <span className="text-sm font-medium" style={{ color: diff > 0 ? '#15803d' : diff < 0 ? '#b91c1c' : 'var(--text-secondary)' }}>New stock level</span>
+              <span className="text-lg font-bold" style={{ color: diff > 0 ? '#15803d' : diff < 0 ? '#b91c1c' : 'var(--text-primary)' }}>
+                {newStock} units {diff !== 0 ? `(${diff > 0 ? '+' : ''}${diff})` : ''}
+              </span>
+            </div>
+          )}
+
+          {/* Reason */}
+          <div>
+            <p className="text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>Reason <span style={{ color: '#ef4444' }}>*</span></p>
+            <div className="grid grid-cols-2 gap-2">
+              {reasons.map(r => (
+                <button key={r} onClick={() => setReason(r)}
+                  className="py-2 px-3 rounded-xl text-xs font-semibold text-left transition-all"
+                  style={reason === r ? { background: 'var(--primary-color)', color: '#fff' } : { background: 'var(--bg-surface-2)', color: 'var(--text-secondary)' }}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="flex gap-3 px-6 py-4" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+          <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm font-semibold" style={{ background: 'var(--bg-surface-2)', color: 'var(--text-secondary)' }}>Cancel</button>
+          <button onClick={handleSave} disabled={saving || qty === 0 || !reason} className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 disabled:opacity-60" style={{ background: 'var(--primary-color)' }}>
+            {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : 'Apply Adjustment'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function InventoryPage() {
+  const { selectedBranchId, selectedBranchName } = useBranchStore();
+
   const [insights, setInsights] = useState<InventoryInsights | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'stock' | 'insights'>('stock');
+  const [products, setProducts]   = useState<StockProduct[]>([]);
+  const [stockSearch, setStockSearch] = useState('');
+  const [stockFilter, setStockFilter] = useState<'all' | 'low' | 'out' | 'ok'>('all');
+  const [adjustingProduct, setAdjustingProduct] = useState<StockProduct | null>(null);
 
-  useEffect(() => { fetchInsights(); }, []);
-
-  const fetchInsights = async () => {
+  const fetchInsights = useCallback(async () => {
     setIsLoading(true);
     try {
-      const { data } = await fetchWithOfflineFallback('/api/inventory/insights');
-      setInsights(data);
-    } catch { toast.error('Failed to load inventory insights'); }
+      const branchParam = selectedBranchId ? `?branchId=${selectedBranchId}` : '';
+      const [insRes, prodRes] = await Promise.all([
+        fetchWithOfflineFallback(`/api/inventory/insights${branchParam}`),
+        fetch(`/api/products${branchParam ? '?' + branchParam.slice(1) : ''}`).then(r => r.ok ? r.json() : { products: [] }),
+      ]);
+      setInsights(insRes.data);
+      setProducts(prodRes.products || []);
+    } catch { toast.error('Failed to load inventory data'); }
     finally { setIsLoading(false); }
+  }, [selectedBranchId]);
+
+  useEffect(() => { fetchInsights(); }, [fetchInsights]);
+
+  const handleStockAdjust = async (id: string, newStock: number, reason: string) => {
+    try {
+      const res = await fetch(`/api/products/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stock: newStock, adjustmentReason: reason }),
+      });
+      if (res.ok) {
+        setProducts(prev => prev.map(p => p._id === id ? { ...p, stock: newStock } : p));
+        toast.success(`Stock updated to ${newStock} units.`);
+        setAdjustingProduct(null);
+      } else {
+        toast.error('Failed to update stock.');
+      }
+    } catch { toast.error('Something went wrong — please try again.'); }
+  };
+
+  const filteredProducts = products.filter(p => {
+    const q = stockSearch.toLowerCase();
+    const matchQ = !q || p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q);
+    const status = p.stock <= 0 ? 'out' : p.stock <= p.lowStockThreshold ? 'low' : 'ok';
+    const matchFilter = stockFilter === 'all' || status === stockFilter;
+    return matchQ && matchFilter;
+  });
+
+  const stockStats = {
+    total: products.length,
+    totalUnits: products.reduce((s, p) => s + p.stock, 0),
+    value: products.reduce((s, p) => s + p.stock * (p.cost || 0), 0),
+    needsReorder: products.filter(p => p.stock <= p.lowStockThreshold).length,
   };
 
   const summary = insights ? {
@@ -240,8 +428,14 @@ export default function InventoryPage() {
           <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>
             Inventory Intelligence
           </h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+          <p className="text-sm mt-0.5 flex items-center gap-2 flex-wrap" style={{ color: 'var(--text-secondary)' }}>
             AI-powered insights to optimise your stock and maximise revenue
+            {selectedBranchName && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
+                style={{ background: 'var(--brand-100)', color: 'var(--primary-color)' }}>
+                · {selectedBranchName}
+              </span>
+            )}
           </p>
         </div>
         <button
@@ -253,6 +447,135 @@ export default function InventoryPage() {
         </button>
       </div>
 
+      {/* ── Tabs ── */}
+      <div className="flex gap-1 p-1 rounded-xl w-fit" style={{ background: 'var(--bg-surface-2)' }}>
+        {([
+          { key: 'stock',    label: 'Stock Levels'  },
+          { key: 'insights', label: 'AI Insights'   },
+        ] as const).map(tab => (
+          <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+            className="px-5 py-2 rounded-lg text-sm font-semibold transition-all"
+            style={activeTab === tab.key
+              ? { background: 'var(--bg-surface)', color: 'var(--text-primary)' }
+              : { color: 'var(--text-secondary)' }}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Stock Levels Tab ── */}
+      {activeTab === 'stock' && (
+        <div className="space-y-6">
+          {/* Stats */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <KpiCard label="Total SKUs"        value={stockStats.total}                                         sub="unique products"      icon={Package}         color="#10b981" />
+            <KpiCard label="Total Units"       value={stockStats.totalUnits.toLocaleString()}                   sub="across all products"  icon={Boxes}           color="#3b82f6" />
+            <KpiCard label="Inventory Value"   value={`GH₵${(stockStats.value/1000).toFixed(1)}k`}             sub="at cost price"        icon={CircleDollarSign} color="#8b5cf6" />
+            <KpiCard label="Needs Reorder"     value={stockStats.needsReorder}                                  sub="below threshold"      icon={AlertTriangleIcon} color="#ef4444" />
+          </div>
+
+          {/* Search + filter */}
+          <div className="rounded-2xl p-4 flex flex-col sm:flex-row gap-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}>
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--text-tertiary)' }} />
+              <input value={stockSearch} onChange={e => setStockSearch(e.target.value)} placeholder="Search by product name or SKU…"
+                className="w-full pl-9 pr-9 py-2.5 rounded-xl text-sm border outline-none transition-all"
+                style={{ background: 'var(--bg-surface-2)', color: 'var(--text-primary)', border: '1px solid var(--border-default)' }} />
+              {stockSearch && <button onClick={() => setStockSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-tertiary)' }}><X className="w-3.5 h-3.5" /></button>}
+            </div>
+            <div className="flex items-center gap-2">
+              {([
+                { key: 'all', label: 'All'       },
+                { key: 'out', label: 'Out of Stock' },
+                { key: 'low', label: 'Low Stock'   },
+                { key: 'ok',  label: 'In Stock'    },
+              ] as const).map(f => (
+                <button key={f.key} onClick={() => setStockFilter(f.key)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
+                  style={stockFilter === f.key ? { background: 'var(--primary-color)', color: '#fff' } : { background: 'var(--bg-surface-2)', color: 'var(--text-secondary)' }}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}>
+            <div className="hidden md:grid px-5 py-3" style={{ gridTemplateColumns: '1fr auto auto auto auto', gap: '1rem', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-surface-2)' }}>
+              {['Product', 'SKU', 'Stock', 'Threshold', 'Actions'].map(h => (
+                <p key={h} className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{h}</p>
+              ))}
+            </div>
+            {filteredProducts.length === 0 ? (
+              <div className="py-16 text-center">
+                <Package className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--text-tertiary)' }} />
+                <p className="font-semibold" style={{ color: 'var(--text-primary)' }}>No products found</p>
+                <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
+                  {stockSearch || stockFilter !== 'all' ? 'Try adjusting your search or filter.' : 'Add products to track inventory.'}
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y" style={{ borderColor: 'var(--border-subtle)' }}>
+                {filteredProducts.map(p => {
+                  const stockStatus = p.stock <= 0 ? 'out' : p.stock <= p.lowStockThreshold ? 'low' : 'ok';
+                  const stockColor = { out: '#b91c1c', low: '#b45309', ok: '#15803d' }[stockStatus];
+                  const stockBg = { out: '#fef2f2', low: '#fffbeb', ok: '#f0fdf4' }[stockStatus];
+                  return (
+                    <div key={p._id} className="hidden md:grid items-center px-5 py-4 hover:bg-[var(--bg-surface-2)] transition-colors" style={{ gridTemplateColumns: '1fr auto auto auto auto', gap: '1rem' }}>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                          style={{ background: p.category?.color || '#10b981' }}>
+                          {p.name.slice(0, 2).toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{p.name}</p>
+                          {p.category && <p className="text-xs truncate" style={{ color: 'var(--text-tertiary)' }}>{p.category.name}</p>}
+                        </div>
+                      </div>
+                      <p className="text-xs font-mono" style={{ color: 'var(--text-tertiary)' }}>{p.sku}</p>
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap" style={{ background: stockBg, color: stockColor }}>
+                        {p.stock} units
+                      </span>
+                      <p className="text-xs text-right" style={{ color: 'var(--text-tertiary)' }}>min {p.lowStockThreshold}</p>
+                      <div className="flex items-center gap-1 justify-end">
+                        <button onClick={() => setAdjustingProduct(p)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:opacity-80" style={{ background: 'var(--bg-surface-2)', color: 'var(--text-secondary)' }}>
+                          <Edit className="w-3 h-3" /> Adjust
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+                {/* Mobile cards */}
+                {filteredProducts.map(p => {
+                  const stockStatus = p.stock <= 0 ? 'out' : p.stock <= p.lowStockThreshold ? 'low' : 'ok';
+                  const stockColor = { out: '#b91c1c', low: '#b45309', ok: '#15803d' }[stockStatus];
+                  const stockBg = { out: '#fef2f2', low: '#fffbeb', ok: '#f0fdf4' }[stockStatus];
+                  return (
+                    <div key={p._id + '-m'} className="md:hidden flex items-center gap-3 px-4 py-3">
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: p.category?.color || '#10b981' }}>
+                        {p.name.slice(0, 2).toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{p.name}</p>
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: stockBg, color: stockColor }}>{p.stock} units</span>
+                      </div>
+                      <button onClick={() => setAdjustingProduct(p)} className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:opacity-80" style={{ background: 'var(--bg-surface-2)', color: 'var(--text-secondary)' }}>
+                        Adjust
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Insights Tab ── */}
+      {activeTab === 'insights' && (
+        <div className="space-y-6">
       {/* ── KPI Cards ── */}
       {summary && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -535,6 +858,17 @@ export default function InventoryPage() {
           )}
         </SectionCard>
       </div>
+      </div>
+      )}
+
+      {/* ── Adjust Modal ── */}
+      {adjustingProduct && (
+        <AdjustModal
+          product={adjustingProduct}
+          onClose={() => setAdjustingProduct(null)}
+          onSave={handleStockAdjust}
+        />
+      )}
     </div>
   );
 }

@@ -3,11 +3,13 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { Card } from '@/components/ui/Card';
 import { useCartStore } from '@/store/useCartStore';
+import { useBranchStore } from '@/store/useBranchStore';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { useKeyboardShortcuts, POS_SHORTCUTS } from '@/hooks/useKeyboardShortcuts';
 import { ReceiptPreview } from '@/components/pos/ReceiptPreview';
 import { HeldCartsModal } from '@/components/pos/HeldCartsModal';
 import { CalculatorModal } from '@/components/pos/CalculatorModal';
+import { EndOfDayModal } from '@/components/pos/EndOfDayModal';
 import { addOfflineSale, holdCart, syncOfflineSales } from '@/lib/indexedDB';
 import { getCachedData } from '@/lib/offlineDataCache';
 import toast from 'react-hot-toast';
@@ -15,7 +17,7 @@ import {
   Package, ShoppingCart, User, FileText,
   X, CheckCircle2, Calculator, Search, Banknote, CreditCard,
   SplitSquareHorizontal, Minus, Plus, Tag, Zap, Layers,
-  ChevronDown, ChevronUp, ScanBarcode, CloudOff,
+  ChevronDown, ChevronUp, ScanBarcode, CloudOff, Moon,
 } from 'lucide-react';
 
 interface Product {
@@ -32,6 +34,8 @@ function getInitials(name: string) {
 }
 
 export default function POSPage() {
+  const { selectedBranchId, selectedBranchName } = useBranchStore();
+
   const [products,          setProducts]          = useState<Product[]>([]);
   const [productsLoading,   setProductsLoading]   = useState(true);
   const [search,            setSearch]            = useState('');
@@ -48,6 +52,7 @@ export default function POSPage() {
   const [appliedDiscount,   setAppliedDiscount]   = useState<any>(null);
   const [isApplyingDiscount,setIsApplyingDiscount]= useState(false);
   const [showCalculator,    setShowCalculator]    = useState(false);
+  const [showEndOfDay,      setShowEndOfDay]      = useState(false);
   const [showCustomer,      setShowCustomer]      = useState(false);
   const [categoryFilter,    setCategoryFilter]    = useState('');
   const [fromCache,         setFromCache]         = useState(false);
@@ -77,9 +82,25 @@ export default function POSPage() {
     setProductsLoading(true);
     try {
       if (isOnline) {
-        const res  = await fetch(`/api/products?search=${encodeURIComponent(searchRef.current)}`);
-        const data = await res.json();
-        setProducts(data.products || []);
+        if (selectedBranchId) {
+          // When a branch is selected, fetch branch inventory (includes branch-specific stock)
+          const res  = await fetch(`/api/branches/${selectedBranchId}/inventory`);
+          const data = await res.json();
+          const branchProducts: Product[] = (data.inventory || []).map((item: any) => ({
+            _id:      item.product._id,
+            name:     item.product.name,
+            price:    item.product.price,
+            cost:     item.product.cost,
+            stock:    item.stock,              // branch-specific stock
+            category: item.product.category || { name: 'Uncategorized', color: '#6b7280' },
+          }));
+          const q = searchRef.current.toLowerCase();
+          setProducts(q ? branchProducts.filter(p => p.name.toLowerCase().includes(q)) : branchProducts);
+        } else {
+          const res  = await fetch(`/api/products?search=${encodeURIComponent(searchRef.current)}`);
+          const data = await res.json();
+          setProducts(data.products || []);
+        }
         setFromCache(false);
       } else {
         // Serve from IndexedDB cache when offline
@@ -105,13 +126,13 @@ export default function POSPage() {
     } finally {
       setProductsLoading(false);
     }
-  }, [isOnline]);
+  }, [isOnline, selectedBranchId]);
 
-  // Re-fetch when online status changes (immediate) or search changes (debounced)
+  // Re-fetch when online status changes (immediate) or branch changes
   useEffect(() => {
     fetchProducts();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOnline]);
+  }, [isOnline, selectedBranchId]);
 
   useEffect(() => {
     setProductsLoading(true);
@@ -214,6 +235,7 @@ export default function POSPage() {
         : paymentMethod === 'cash'  ? { cash: getFinalTotal() }
         : { card: getFinalTotal() },
       customerInfo: customerInfo.phone ? customerInfo : undefined,
+      branchId:     selectedBranchId ?? undefined,
     };
 
     const receiptBase = {
@@ -311,6 +333,17 @@ export default function POSPage() {
       {/* ── Left: Product panel ─────────────────────────────── */}
       <div className="flex-1 flex flex-col min-h-0 min-w-0">
 
+        {/* Branch indicator */}
+        {selectedBranchName && (
+          <div className="flex items-center gap-2 mb-2 px-1">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold"
+              style={{ background: 'var(--brand-100)', color: 'var(--primary-color)' }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--primary-color)', display: 'inline-block' }} />
+              {selectedBranchName}
+            </span>
+          </div>
+        )}
+
         {/* Search + held carts */}
         <div className="flex items-center gap-3 mb-3">
           <div className="relative flex-1">
@@ -332,11 +365,19 @@ export default function POSPage() {
             <FileText className="w-4 h-4" />
             <span className="hidden sm:inline">Held Carts</span>
           </button>
+          <button
+            onClick={() => setShowEndOfDay(true)}
+            className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-strong)] transition-all whitespace-nowrap"
+            title="End of Day Report"
+          >
+            <Moon className="w-4 h-4" />
+            <span className="hidden sm:inline">End of Day</span>
+          </button>
         </div>
 
         {/* Offline cache notice */}
         {fromCache && (
-          <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/50 text-xs font-medium text-amber-700 dark:text-amber-400">
+          <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-xs font-medium text-amber-700">
             <CloudOff className="w-3.5 h-3.5 flex-shrink-0" />
             Showing cached products — prices may not reflect latest changes
           </div>
@@ -410,7 +451,7 @@ export default function POSPage() {
                         ? 'border-[var(--border-subtle)] opacity-50 cursor-not-allowed'
                         : inCart
                         ? 'border-[var(--primary-color)] bg-[var(--brand-50)]'
-                        : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:border-[var(--primary-color)]/50 hover:shadow-md hover:-translate-y-0.5'
+                        : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:border-[var(--primary-color)]/50 hover:-translate-y-0.5'
                     }`}
                   >
                     <div className="p-3">
@@ -441,7 +482,7 @@ export default function POSPage() {
                     )}
                     {outOfStock && (
                       <div className="absolute inset-0 flex items-center justify-center bg-[var(--bg-surface)]/60 rounded-2xl">
-                        <span className="text-xs font-bold text-red-500 bg-red-50 dark:bg-red-950/40 px-2 py-1 rounded-full border border-red-200 dark:border-red-800">
+                        <span className="text-xs font-bold text-red-500 bg-red-50 px-2 py-1 rounded-full border border-red-200">
                           Out of Stock
                         </span>
                       </div>
@@ -503,7 +544,7 @@ export default function POSPage() {
                 onClick={() => { clearCart(); setAppliedDiscount(null); setDiscountCode(''); }}
                 disabled={!items.length}
                 data-action="clear"
-                className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-red-600 hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
                 title="Clear cart (ESC)"
               >
                 <X className="w-4 h-4" />
@@ -563,7 +604,7 @@ export default function POSPage() {
 
                       <button
                         onClick={() => removeItem(item.id)}
-                        className="w-7 h-7 rounded-lg text-[var(--text-tertiary)] hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 flex items-center justify-center transition-all flex-shrink-0 opacity-0 group-hover:opacity-100"
+                        className="w-7 h-7 rounded-lg text-[var(--text-tertiary)] hover:text-red-600 hover:bg-red-50 flex items-center justify-center transition-all flex-shrink-0 opacity-0 group-hover:opacity-100"
                       >
                         <X className="w-3.5 h-3.5" />
                       </button>
@@ -615,15 +656,15 @@ export default function POSPage() {
                 {/* Discount code */}
                 <div className="mx-4 mb-2">
                   {appliedDiscount ? (
-                    <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/50">
+                    <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-emerald-50 border border-emerald-200">
                       <div className="flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
                         <div>
-                          <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">{appliedDiscount.name}</p>
-                          <p className="text-xs text-emerald-600 dark:text-emerald-400">−GH₵{appliedDiscount.amount.toFixed(2)}</p>
+                          <p className="text-xs font-semibold text-emerald-700">{appliedDiscount.name}</p>
+                          <p className="text-xs text-emerald-600">−GH₵{appliedDiscount.amount.toFixed(2)}</p>
                         </div>
                       </div>
-                      <button onClick={removeDiscount} className="p-1 rounded-lg text-emerald-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 transition-all">
+                      <button onClick={removeDiscount} className="p-1 rounded-lg text-emerald-500 hover:text-red-600 hover:bg-red-50 transition-all">
                         <X className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -675,6 +716,36 @@ export default function POSPage() {
                     ))}
                   </div>
 
+                  {/* Quick cash amounts */}
+                  {paymentMethod === 'cash' && (
+                    <div className="mt-2">
+                      <p className="text-xs font-medium text-[var(--text-tertiary)] mb-1.5">Quick Amount</p>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {[5, 10, 20, 50, 100].map(amt => (
+                          <button
+                            key={amt}
+                            onClick={() => {
+                              toast.success(`GH₵${amt} tendered — change: GH₵${Math.max(0, amt - getFinalTotal()).toFixed(2)}`, { duration: 2500, icon: '💵' });
+                            }}
+                            className="py-2 rounded-xl text-xs font-bold transition-all hover:opacity-80 active:scale-95"
+                            style={{ background: 'var(--bg-surface-2)', color: 'var(--text-primary)', border: '1px solid var(--border-default)' }}
+                          >
+                            GH₵{amt}
+                          </button>
+                        ))}
+                        <button
+                          onClick={() => {
+                            toast.success('Exact amount — no change needed.', { duration: 2000, icon: '✓' });
+                          }}
+                          className="py-2 rounded-xl text-xs font-bold transition-all hover:opacity-80 active:scale-95"
+                          style={{ background: 'var(--primary-color)15', color: 'var(--primary-color)', border: '1px solid var(--primary-color)30' }}
+                        >
+                          Exact
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Split payment inputs */}
                   {paymentMethod === 'split' && (
                     <div className="grid grid-cols-2 gap-2 mt-2">
@@ -697,7 +768,7 @@ export default function POSPage() {
                         />
                       </div>
                       {Math.abs(splitPayment.cash + splitPayment.card - getFinalTotal()) > 0.01 && (
-                        <p className="col-span-2 text-xs text-amber-600 dark:text-amber-400 font-medium">
+                        <p className="col-span-2 text-xs text-amber-600 font-medium">
                           Remaining: GH₵{(getFinalTotal() - splitPayment.cash - splitPayment.card).toFixed(2)}
                         </p>
                       )}
@@ -717,8 +788,8 @@ export default function POSPage() {
                   </div>
                   {appliedDiscount && (
                     <div className="px-4 py-2.5 flex justify-between text-sm border-b border-[var(--border-subtle)]">
-                      <span className="text-emerald-600 dark:text-emerald-400">Discount ({appliedDiscount.code})</span>
-                      <span className="font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                      <span className="text-emerald-600">Discount ({appliedDiscount.code})</span>
+                      <span className="font-semibold text-emerald-600 tabular-nums">
                         −GH₵{getDiscountAmount().toFixed(2)}
                       </span>
                     </div>
@@ -740,7 +811,7 @@ export default function POSPage() {
               onClick={handleCheckout}
               disabled={!items.length || isProcessing}
               data-action="checkout"
-              className="w-full py-3.5 rounded-xl font-bold text-base text-white bg-[var(--primary-color)] hover:opacity-90 active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 shadow-[var(--shadow-brand)]"
+              className="w-full py-3.5 rounded-xl font-bold text-base text-white bg-[var(--primary-color)] hover:opacity-90 active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
             >
               {isProcessing ? (
                 <>
@@ -795,6 +866,14 @@ export default function POSPage() {
           onConfirm={(paid, change) =>
             toast.success(`Cash GH₵${paid.toFixed(2)} · Change GH₵${change.toFixed(2)}`)
           }
+        />
+      )}
+
+      {showEndOfDay && (
+        <EndOfDayModal
+          branchId={selectedBranchId ?? undefined}
+          branchName={selectedBranchName ?? undefined}
+          onClose={() => setShowEndOfDay(false)}
         />
       )}
     </div>

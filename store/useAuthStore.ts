@@ -7,6 +7,7 @@ interface User {
   email: string;
   role: string;
   tenantId: string;
+  branchId?: string | null;
 }
 
 interface AuthState {

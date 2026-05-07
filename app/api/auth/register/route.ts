@@ -1,89 +1,71 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/db';
-import { hashPassword, generateToken, setAuthCookieOnResponse } from '@/lib/auth';
+import { hashPassword } from '@/lib/auth';
 import User from '@/models/User';
 import Business from '@/models/Business';
+import SubscriptionPlan from '@/models/SubscriptionPlan';
 
 export async function POST(req: NextRequest) {
   try {
     await connectDB();
     
     const body = await req.json();
-    const { businessName, email, password, name, phone, address } = body;
+    const { businessName, email, password, name, phone, address, planName } = body;
 
-    // Validate input
     if (!businessName || !email || !password || !name) {
-      return NextResponse.json(
-        { error: 'Missing required fields' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    // Check if user exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      return NextResponse.json(
-        { error: 'Email already registered' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Email already registered' }, { status: 400 });
     }
 
-    // Create business
+    // Resolve plan — fall back to default/starter if not provided or not found
+    let plan = null;
+    if (planName) {
+      plan = await SubscriptionPlan.findOne({ name: planName, isActive: true });
+    }
+    if (!plan) {
+      plan = await SubscriptionPlan.findOne({ isDefault: true, isActive: true });
+    }
+
+    const chosenPlan = plan?.name ?? 'starter';
+    const planLimits = plan?.limits ?? { maxEmployees: 5, maxBranches: 1, maxProducts: 500, hasAnalytics: false };
+
+    // Trial starts from the moment the superadmin approves — not from registration.
+    // subscriptionExpiry is intentionally null until approval.
     const business = await Business.create({
       name: businessName,
       email,
       phone: phone || '',
       address: address || '',
-      subscriptionPlan: 'starter',
+      subscriptionPlan: chosenPlan,
       subscriptionStatus: 'trial',
-      subscriptionExpiry: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days trial
-      limits: {
-        maxEmployees: 5,
-        maxBranches: 1,
-        hasAnalytics: false
-      }
+      subscriptionExpiry: null,
+      limits: planLimits,
+      approvalStatus: 'pending',
+      isActive: false,
     });
 
-    // Create business owner
     const hashedPassword = await hashPassword(password);
-    const user = await User.create({
+    await User.create({
       tenantId: business._id,
       email,
       password: hashedPassword,
       name,
       role: 'business_owner',
-      phone
+      phone,
     });
 
-    // Generate token
-    const token = generateToken({
-      userId: user._id.toString(),
-      tenantId: business._id.toString(),
-      role: user.role,
-      email: user.email
-    });
-
-    const response = NextResponse.json({
+    // No JWT issued — account must be approved by superadmin before login is possible
+    return NextResponse.json({
       success: true,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        tenantId: business._id
-      },
-      business: {
-        id: business._id,
-        name: business.name
-      }
+      pending: true,
+      business: { name: business.name, plan: chosenPlan },
     });
-    setAuthCookieOnResponse(response, token);
-    return response;
   } catch (error: any) {
     console.error('Registration error:', error);
-    return NextResponse.json(
-      { error: error.message || 'Registration failed' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error.message || 'Registration failed' }, { status: 500 });
   }
 }
